@@ -75,7 +75,7 @@ def main():
     if not weights_path.is_absolute():
         # Assume path is relative to the repository root
         weights_path = Path(__file__).resolve().parents[1] / weights_path
-    segmentation.load_model(str(weights_path))
+    print(f"🔧 Using segmentation weights at: {weights_path}")
     inpainting.load_model(
         cfg.get('inpainting', {}).get('weights', ''),
         device=args.device
