@@ -68,6 +68,13 @@ def inpaint(image_rgb: np.ndarray,
             hd_strategy_resize_limit=512,
         )
         result = model(image_rgb, mask, cfg)
+        # Ensure the output is uint8 for OpenCV compatibility
+        if np.issubdtype(result.dtype, np.floating):
+            if result.max() <= 1.0:
+                result = result * 255.0
+            result = np.clip(result, 0, 255).astype(np.uint8)
+        else:
+            result = result.astype(np.uint8)
         return result
 
     elif _lama_model['backend'] == 'direct':
