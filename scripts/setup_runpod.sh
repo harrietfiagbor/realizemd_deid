@@ -40,23 +40,24 @@ echo "✅ Python packages installed"
 export KAGGLE_USERNAME="adjoadede33"
 export KAGGLE_KEY="KGAT_8abb244b54efbba9afc7f3a802af4408"
 
-mkdir -p /workspace/data/images
+mkdir -p /workspace/data/eyepacs/images
 kaggle competitions download -c diabetic-retinopathy-detection \
     -f test.zip.001 -p /workspace/data/
 
 # This handles the nested zip wrapper you found
-unzip -o /workspace/data/test.zip.001.zip -d /workspace/data/images/
+unzip -o /workspace/data/test.zip.001.zip -d /workspace/data/eyepacs/
 
-# This extracts the JPEGs. The "|| true" ensures it doesn't crash on the 'Unexpected end' error
-7z e /workspace/data/images/test.zip.001 -o/workspace/data/images/ "*.jpeg" -r -y || true
+# This extracts the JPEGs flat into /workspace/data/eyepacs/images/
+7z e /workspace/data/eyepacs/test.zip.001 -o/workspace/data/eyepacs/images/ "*.jpeg" -r -y || true
 
 # Cleanup to keep your workspace from getting full
-rm -f /workspace/data/test.zip.001.zip /workspace/data/images/test.zip.001
+rm -f /workspace/data/test.zip.001.zip /workspace/data/eyepacs/test.zip.001
 
-echo "Done: $(ls /workspace/data/images/test/ | wc -l) images"
+echo "Done: $(ls /workspace/data/eyepacs/images/ | wc -l) images"
 
 # ── Download Model A weights (arkanivasarkar Attention U-Net) ─────────────────
 mkdir -p /workspace/models
+ln -sfn /workspace/models /workspace/realizemd_deid/models
 git clone --quiet \
     https://github.com/arkanivasarkar/Retinal-Vessel-Segmentation-using-variants-of-UNET \
     /workspace/arkan_unet
@@ -92,7 +93,7 @@ echo "=== Setup complete — everything is ready ==="
 echo ""
 echo "De-identify:"
 echo "  python scripts/run_pipeline.py \\"
-echo "      --input   /workspace/data/images/test/ \\"
+echo "      --input   /workspace/data/eyepacs/images/ \\"
 echo "      --output  /workspace/data/deid/ \\"
 echo "      --weights '/workspace/models/attention_unet/AttentionUNet.h5' \\"
 echo "      --device  cuda"
