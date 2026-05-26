@@ -65,9 +65,11 @@ ln -sfn /workspace/models /workspace/realizemd_deid/models
 if [ -f "/workspace/models/attention_unet/AttentionUNet.h5" ]; then
     echo "✅ Model A weights already exist at /workspace/models/attention_unet/, skipping download."
 else
-    git clone --quiet \
-        https://github.com/arkanivasarkar/Retinal-Vessel-Segmentation-using-variants-of-UNET \
-        /workspace/arkan_unet
+    if [ ! -d "/workspace/arkan_unet" ]; then
+        git clone --quiet \
+            https://github.com/arkanivasarkar/Retinal-Vessel-Segmentation-using-variants-of-UNET \
+            /workspace/arkan_unet
+    fi
     cp -r "/workspace/arkan_unet/Trained models/" /workspace/models/attention_unet/
     echo "✅ Model A weights ready at /workspace/models/attention_unet/"
 fi
@@ -84,12 +86,24 @@ fi
 if [ -f "/workspace/models/RETFound_mae_natureCFP.pth" ]; then
     echo "✅ RETFound weights already exist, skipping download."
 else
+    if [ -z "$HF_TOKEN" ]; then
+        echo "❌ Error: RETFound is a gated model. To download the weights:"
+        echo "   1. Accept the model terms at: https://huggingface.co/YukunZhou/RETFound_mae_natureCFP"
+        echo "   2. Create a Read token at: https://huggingface.co/settings/tokens"
+        echo "   3. Export your token in the shell before running the script:"
+        echo "      export HF_TOKEN=\"your_huggingface_token\""
+        echo "      bash scripts/setup_runpod.sh"
+        exit 1
+    fi
+
     python -c "
 from huggingface_hub import hf_hub_download
+import os
 path = hf_hub_download(
     repo_id='YukunZhou/RETFound_mae_natureCFP',
     filename='RETFound_mae_natureCFP.pth',
-    local_dir='/workspace/models/'
+    local_dir='/workspace/models/',
+    token=os.environ.get('HF_TOKEN')
 )
 print('RETFound weights:', path)
 "
