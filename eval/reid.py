@@ -77,7 +77,10 @@ def embed(img_rgb: np.ndarray) -> np.ndarray:
         raise RuntimeError('RETFound not loaded. Call reid.load_retfound() first.')
     device = _retfound['device']
     tensor = _transform(Image.fromarray(img_rgb)).unsqueeze(0).to(device)
-    emb = _retfound['model'](tensor)
+    if hasattr(_retfound['model'], 'forward_features'):
+        emb = _retfound['model'].forward_features(tensor)
+    else:
+        emb = _retfound['model'](tensor)
     return emb[0].cpu().numpy()  # (1024,)
 
 
