@@ -1,0 +1,64 @@
+# RealizeMD De-identification Pipeline — Default Config
+# All hyperparameters in one place. Override per experiment.
+
+pipeline:
+  target_size: 512          # resize all images to this before processing
+  device: cuda              # cuda | cpu
+
+preprocessing:
+  clahe_clip: 2.0
+  clahe_tile: [8, 8]
+  fov_inset: 5              # pixels to inset from detected FOV edge
+
+segmentation:
+  model: attention_unet     # attention_unet (Model A)
+  weights: models/attention_unet.h5
+  input_channels: 1         # green channel only
+  threshold: 0.5
+
+vessel_mask:
+  dilation_kernel: 5        # px — supervisor target: 8-12% coverage
+
+pathology:
+  optic_disc_threshold: 220
+  optic_disc_dilation: 50
+  hard_exudate:
+    percentile: 97
+    min_brightness: 180
+    min_area: 10
+  haemorrhage:
+    green_threshold: 80
+    min_area: 30
+    max_area: 2000
+    min_circularity: 0.4
+    max_eccentricity: 0.85
+  microaneurysm:
+    blackhat_kernel: 21
+    threshold: 20
+    min_area: 8
+    max_area: 50
+    min_circularity: 0.45
+    max_eccentricity: 0.80
+  lesion_dilation_kernel: 3
+
+inpainting:
+  model: lama
+  weights: models/big-lama/
+  device: cuda
+
+eval:
+  reid:
+    model: retfound           # RETFound ViT-Large as embedder
+    weights: models/RETFound_mae_natureCFP.pth
+    target_rank1_rate: 0.004  # ≤ 2× random at N=500
+    target_same_patient_auc: 0.55
+  utility:
+    dr_classifier: convnext   # convnext | retfound_finetuned
+    preservation_ratio_pass: 0.95
+    preservation_ratio_acceptable: 0.90
+  realism:
+    fid_pass: 30
+    ssim_min: 0.65
+    ssim_max: 0.85
+    lpips_min: 0.15
+    lpips_max: 0.35
