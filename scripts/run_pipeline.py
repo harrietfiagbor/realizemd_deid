@@ -134,13 +134,14 @@ def main():
             )
 
             # Save
-            out_path = output_dir / f'{img_path.stem}_deid.png'
+            dil = mask_cfg.get('dilation_kernel', 5)
+            out_path = output_dir / f'{img_path.stem}_deid_dil{dil}.png'
             cv2.imwrite(str(out_path), cv2.cvtColor(deid, cv2.COLOR_RGB2BGR))
 
             if args.save_masks:
-                cv2.imwrite(str(mask_dir / f'{img_path.stem}_vessel.png'), vessel_mask)
-                cv2.imwrite(str(mask_dir / f'{img_path.stem}_inpaint.png'), mask_result['inpaint_mask'])
-                cv2.imwrite(str(mask_dir / f'{img_path.stem}_lesion.png'), lesion_result['combined'])
+                cv2.imwrite(str(mask_dir / f'{img_path.stem}_vessel_dil{dil}.png'), vessel_mask)
+                cv2.imwrite(str(mask_dir / f'{img_path.stem}_inpaint_dil{dil}.png'), mask_result['inpaint_mask'])
+                cv2.imwrite(str(mask_dir / f'{img_path.stem}_lesion_dil{dil}.png'), lesion_result['combined'])
 
         except Exception as e:
             print(f'\n  ⚠️  Failed {img_path.name}: {e}')

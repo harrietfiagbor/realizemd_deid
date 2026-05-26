@@ -72,8 +72,23 @@ def main():
     eval_cfg = cfg.get('eval', {})
 
     print('\n=== Loading images ===')
+    # Auto-detect suffix (e.g., _deid, _deid_dil15, _deid_dil40, etc.)
+    deid_dir = Path(args.deid)
+    candidate_paths = sorted(
+        list(deid_dir.rglob('*.png')) +
+        list(deid_dir.rglob('*.jpeg')) +
+        list(deid_dir.rglob('*.jpg'))
+    )
+    suffix = '_deid'  # fallback default
+    for p in candidate_paths:
+        if '_deid' in p.stem:
+            idx = p.stem.find('_deid')
+            suffix = p.stem[idx:]
+            break
+    print(f"🔧 Detected de-identified image suffix: '{suffix}'")
+
     # Load deid images first to filter originals
-    deid_images = load_images(Path(args.deid), suffix='_deid', n=args.n)
+    deid_images = load_images(deid_dir, suffix=suffix, n=args.n)
     deid_stems = set(deid_images.keys())
     
     original_images = load_images(Path(args.original), stems_to_keep=deid_stems)
