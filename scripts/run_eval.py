@@ -48,6 +48,11 @@ def load_images(folder: Path, suffix: str = '', n: int = None, stems_to_keep: se
         list(folder.rglob('*.jpeg')) +
         list(folder.rglob('*.jpg'))
     )
+    # Filter out hidden folders/files and jupyter checkpoints
+    paths = [
+        p for p in paths
+        if '.ipynb_checkpoints' not in p.parts and not any(part.startswith('.') for part in p.parts)
+    ]
     if suffix:
         paths = [p for p in paths if p.stem.endswith(suffix)]
     if stems_to_keep is not None:
@@ -79,9 +84,14 @@ def main():
         list(deid_dir.rglob('*.jpeg')) +
         list(deid_dir.rglob('*.jpg'))
     )
+    # Filter out hidden folders/files and jupyter checkpoints
+    candidate_paths = [
+        p for p in candidate_paths
+        if '.ipynb_checkpoints' not in p.parts and not any(part.startswith('.') for part in p.parts)
+    ]
     suffix = '_deid'  # fallback default
     for p in candidate_paths:
-        if '_deid' in p.stem:
+        if '_deid' in p.stem and not p.stem.endswith('-checkpoint'):
             idx = p.stem.find('_deid')
             suffix = p.stem[idx:]
             break
