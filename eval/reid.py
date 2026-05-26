@@ -2,8 +2,13 @@
 eval/reid.py
 Privacy metric — Re-identification rate using RETFound embeddings.
 Implements Section 2.1 of the supervisor's eval framework.
+
+Patient-aware: EyePACS images are paired (left/right per patient).
+A re-id hit = matching to *any* image of the same patient, not just
+the exact same laterality.
 """
 
+import re
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -11,6 +16,22 @@ from pathlib import Path
 from PIL import Image
 import torchvision.transforms as T
 from tqdm import tqdm
+
+
+def _patient_id(stem: str) -> str:
+    """Extract patient ID from an EyePACS-style filename stem.
+
+    Handles patterns like:
+      '12345_left'  -> '12345'
+      '12345_right' -> '12345'
+      '12345_left_deid' -> '12345'
+      '12345'       -> '12345'  (no laterality suffix)
+    """
+    # Strip known pipeline suffixes first
+    s = re.sub(r'(_deid(-checkpoint)?)', '', stem)
+    # Strip laterality
+    s = re.sub(r'[_-](left|right)$', '', s, flags=re.IGNORECASE)
+    return s
 
 
 _retfound = None
@@ -103,55 +124,68 @@ def embed_batch(image_dict: dict) -> dict:
 def compute_reid_rate(original_embeddings: dict,
                       deid_embeddings: dict) -> dict:
     """
-    Compute Rank-1 re-identification rate.
+    Compute patient-aware Rank-1 re-identification rate.
 
     For each de-identified image, find the closest original in embedding space.
-    Rank-1 re-id = fraction where closest match is the correct patient.
+    A match counts as correct if the top-1 hit belongs to the **same patient**
+    (either eye), not just the exact same image stem.
 
     Args:
         original_embeddings: {stem: (1024,) embedding}
         deid_embeddings:     {stem: (1024,) embedding}
 
     Returns dict:
-        rank1_rate:      fraction correctly re-identified
-        random_baseline: 1/N
+        n_images:        number of de-identified images evaluated
+        n_patients:      number of unique patients
+        rank1_rate:      fraction correctly re-identified (patient-level)
+        random_baseline: 1 / n_patients
         ratio_vs_random: rank1_rate / random_baseline
         pass:            bool (≤ 2× random baseline)
-        per_image:       list of per-image result dicts
         same_patient_auc: AUC for same vs different patient pair classification
+        per_image:       list of per-image result dicts
     """
     stems = list(deid_embeddings.keys())
     orig_keys = list(original_embeddings.keys())
     orig_matrix = np.stack([original_embeddings[k] for k in orig_keys])  # (N, 1024)
 
+    # Build patient-ID lookup for originals
+    orig_pid = {k: _patient_id(k) for k in orig_keys}
+
     n = len(stems)
-    random_baseline = 1 / len(orig_keys)
+    unique_patients = set(orig_pid.values())
+    n_patients = len(unique_patients)
+    random_baseline = 1 / n_patients if n_patients > 0 else 0
     per_image = []
     n_correct = 0
 
     for stem in stems:
-        if stem not in deid_embeddings:
-            continue
         e_deid = deid_embeddings[stem]
+        pid = _patient_id(stem)
 
         # Cosine similarity to all originals
         norms = np.linalg.norm(orig_matrix, axis=1) * np.linalg.norm(e_deid) + 1e-8
         sims = (orig_matrix @ e_deid) / norms
 
-        top1_key = orig_keys[np.argmax(sims)]
-        correct = (top1_key == stem)
+        top1_idx = int(np.argmax(sims))
+        top1_key = orig_keys[top1_idx]
+        top1_pid = orig_pid[top1_key]
+        correct = (top1_pid == pid)
         if correct:
             n_correct += 1
 
-        self_sim = float(sims[orig_keys.index(stem)]) if stem in orig_keys else None
+        # Self-similarity: best sim to any original of the SAME patient
+        same_patient_idxs = [i for i, k in enumerate(orig_keys) if orig_pid[k] == pid]
+        self_sim = float(max(sims[i] for i in same_patient_idxs)) if same_patient_idxs else None
 
         per_image.append({
-            'stem':          stem,
-            'top1_match':    top1_key,
-            'top1_correct':  correct,
-            'self_similarity': self_sim,
-            'top1_sim':      float(np.max(sims)),
-            'mean_sim':      float(np.mean(sims)),
+            'stem':            stem,
+            'patient_id':      pid,
+            'top1_match':      top1_key,
+            'top1_patient':    top1_pid,
+            'top1_correct':    correct,
+            'self_similarity':  self_sim,
+            'top1_sim':        float(np.max(sims)),
+            'mean_sim':        float(np.mean(sims)),
         })
 
     rank1_rate = n_correct / n if n > 0 else 0
@@ -163,10 +197,11 @@ def compute_reid_rate(original_embeddings: dict,
     )
 
     return {
-        'n':                 n,
+        'n_images':          n,
+        'n_patients':        n_patients,
         'rank1_rate':        round(rank1_rate, 4),
         'random_baseline':   round(random_baseline, 4),
-        'ratio_vs_random':   round(rank1_rate / random_baseline, 2),
+        'ratio_vs_random':   round(rank1_rate / random_baseline, 2) if random_baseline > 0 else 0,
         'pass':              rank1_rate <= target,
         'same_patient_auc':  round(same_patient_auc, 4),
         'per_image':         per_image,
@@ -177,21 +212,25 @@ def _compute_same_patient_auc(original_embeddings: dict,
                                deid_embeddings: dict) -> float:
     """
     AUC for same-patient vs different-patient pair cosine similarity.
+    Patient-aware: left/right images of the same patient are positive pairs.
     Target: ≤ 0.55 (near random).
     """
     from sklearn.metrics import roc_auc_score
 
-    stems = [s for s in deid_embeddings if s in original_embeddings]
+    deid_stems = list(deid_embeddings.keys())
+    orig_stems = list(original_embeddings.keys())
     labels, scores = [], []
 
-    for i, s1 in enumerate(stems):
+    for s1 in deid_stems:
+        pid1 = _patient_id(s1)
         e1 = deid_embeddings[s1]
-        for j, s2 in enumerate(stems):
+        for s2 in orig_stems:
+            pid2 = _patient_id(s2)
             e2 = original_embeddings[s2]
             sim = float(
                 np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2) + 1e-8)
             )
-            labels.append(1 if s1 == s2 else 0)
+            labels.append(1 if pid1 == pid2 else 0)
             scores.append(sim)
 
     if len(set(labels)) < 2:

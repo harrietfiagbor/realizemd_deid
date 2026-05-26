@@ -127,7 +127,8 @@ def main():
     deid_embeddings = reid.embed_batch(deid_images)
 
     reid_results = reid.compute_reid_rate(orig_embeddings, deid_embeddings)
-    print(f'  Rank-1 re-id rate: {reid_results["rank1_rate"]:.4f}')
+    print(f'  Images: {reid_results["n_images"]}  |  Patients: {reid_results["n_patients"]}')
+    print(f'  Rank-1 re-id rate: {reid_results["rank1_rate"]:.4f}  (random baseline: {reid_results["random_baseline"]:.4f})')
     print(f'  vs. random:        {reid_results["ratio_vs_random"]:.2f}×')
     print(f'  Same-patient AUC:  {reid_results["same_patient_auc"]:.4f}')
     print(f'  Result: {"✅ PASS" if reid_results["pass"] else "❌ FAIL"}')
