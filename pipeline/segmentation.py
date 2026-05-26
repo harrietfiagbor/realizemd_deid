@@ -19,6 +19,18 @@ def load_model(weights_path: str):
         import tf_keras as keras
     except ImportError:
         from tensorflow import keras
+
+    # Monkeypatch Conv2DTranspose to ignore 'groups' (Keras 3 compatibility workaround)
+    try:
+        Conv2DTranspose = keras.layers.Conv2DTranspose
+        original_init = Conv2DTranspose.__init__
+        def patched_init(self, *args, **kwargs):
+            kwargs.pop('groups', None)
+            return original_init(self, *args, **kwargs)
+        Conv2DTranspose.__init__ = patched_init
+    except Exception as e:
+        print(f"Note: Could not patch Conv2DTranspose: {e}")
+
     _model = keras.models.load_model(weights_path, compile=False)
     print(f'✅ Segmentation model loaded')
     print(f'   Input:  {_model.input_shape}')
