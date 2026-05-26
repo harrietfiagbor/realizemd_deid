@@ -37,7 +37,7 @@ def parse_args():
     p.add_argument('--model-name', default='Model A + LaMa')
     p.add_argument('--config',     default='configs/default.yaml')
     p.add_argument('--device',     default='cuda')
-    p.add_argument('--n',          type=int, default=None, help='Limit to N images')
+    p.add_argument('--n', '--limit', type=int, default=None, dest='n', help='Limit to N images')
     return p.parse_args()
 
 

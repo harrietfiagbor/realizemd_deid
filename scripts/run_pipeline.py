@@ -32,7 +32,7 @@ def parse_args():
     p.add_argument('--weights', default=None,  help='Path to Model A .h5 weights')
     p.add_argument('--config',  default='configs/default.yaml')
     p.add_argument('--device',  default='cuda', choices=['cuda', 'cpu'])
-    p.add_argument('--n',       type=int, default=None, help='Limit to N images (for testing)')
+    p.add_argument('--n', '--limit', type=int, default=None, dest='n', help='Limit to N images (for testing)')
     p.add_argument('--save-masks', action='store_true', help='Also save intermediate masks')
     return p.parse_args()
 
