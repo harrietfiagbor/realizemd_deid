@@ -41,7 +41,7 @@ def parse_args():
     return p.parse_args()
 
 
-def load_images(folder: Path, suffix: str = '', n: int = None) -> dict:
+def load_images(folder: Path, suffix: str = '', n: int = None, stems_to_keep: set = None) -> dict:
     """Load {stem: img_rgb} from a folder. suffix filters by name ending."""
     paths = sorted(
         list(folder.rglob('*.png')) +
@@ -50,6 +50,8 @@ def load_images(folder: Path, suffix: str = '', n: int = None) -> dict:
     )
     if suffix:
         paths = [p for p in paths if p.stem.endswith(suffix)]
+    if stems_to_keep is not None:
+        paths = [p for p in paths if p.stem.replace(suffix, '') in stems_to_keep]
     if n:
         paths = paths[:n]
 
@@ -70,8 +72,11 @@ def main():
     eval_cfg = cfg.get('eval', {})
 
     print('\n=== Loading images ===')
-    original_images = load_images(Path(args.original), n=args.n)
-    deid_images     = load_images(Path(args.deid), suffix='_deid', n=args.n)
+    # Load deid images first to filter originals
+    deid_images = load_images(Path(args.deid), suffix='_deid', n=args.n)
+    deid_stems = set(deid_images.keys())
+    
+    original_images = load_images(Path(args.original), stems_to_keep=deid_stems)
 
     # Match stems
     common = set(original_images) & set(deid_images)
