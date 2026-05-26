@@ -75,6 +75,8 @@ def embed(img_rgb: np.ndarray) -> np.ndarray:
     """Get 1024-dim RETFound embedding from an RGB image."""
     if _retfound is None:
         raise RuntimeError('RETFound not loaded. Call reid.load_retfound() first.')
+    device = _retfound['device']
+    tensor = _transform(Image.fromarray(img_rgb)).unsqueeze(0).to(device)
     if hasattr(_retfound['model'], 'forward_features'):
         emb = _retfound['model'].forward_features(tensor)
     else:
