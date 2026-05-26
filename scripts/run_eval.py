@@ -89,12 +89,20 @@ def main():
         p for p in candidate_paths
         if '.ipynb_checkpoints' not in p.parts and not any(part.startswith('.') for part in p.parts)
     ]
-    suffix = '_deid'  # fallback default
-    for p in candidate_paths:
-        if '_deid' in p.stem and not p.stem.endswith('-checkpoint'):
-            idx = p.stem.find('_deid')
-            suffix = p.stem[idx:]
-            break
+    # Check if there's an expected suffix from the current config
+    dil = cfg.get('vessel_mask', {}).get('dilation_kernel', 5)
+    expected_suffix = f'_deid_dil{dil}'
+    has_expected = any(p.stem.endswith(expected_suffix) for p in candidate_paths)
+
+    if has_expected:
+        suffix = expected_suffix
+    else:
+        suffix = '_deid'  # fallback default
+        for p in candidate_paths:
+            if '_deid' in p.stem and not p.stem.endswith('-checkpoint'):
+                idx = p.stem.find('_deid')
+                suffix = p.stem[idx:]
+                break
     print(f"🔧 Detected de-identified image suffix: '{suffix}'")
 
     # Load deid images first to filter originals
