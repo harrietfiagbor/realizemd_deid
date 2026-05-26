@@ -17,7 +17,7 @@ segmentation:
   threshold: 0.5
 
 vessel_mask:
-  dilation_kernel: 25       # px — supervisor target: 8-12% coverage
+  dilation_kernel: 40       # px — supervisor target: 8-12% coverage
 
 pathology:
   optic_disc_threshold: 220
