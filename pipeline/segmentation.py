@@ -31,7 +31,14 @@ def load_model(weights_path: str):
     except Exception as e:
         print(f"Note: Could not patch Conv2DTranspose: {e}")
 
-    _model = keras.models.load_model(weights_path, compile=False)
+    # Enable unsafe deserialization for Lambda layers in Keras 3
+    if hasattr(keras, 'config') and hasattr(keras.config, 'enable_unsafe_deserialization'):
+        keras.config.enable_unsafe_deserialization()
+
+    try:
+        _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
+    except TypeError:
+        _model = keras.models.load_model(weights_path, compile=False)
     print(f'✅ Segmentation model loaded')
     print(f'   Input:  {_model.input_shape}')
     print(f'   Output: {_model.output_shape}')
