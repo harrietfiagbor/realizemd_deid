@@ -113,7 +113,7 @@ fi
 # ── Download LaMa weights ─────────────────────────────────────────────────────
 # lama-cleaner auto-downloads on first use — pre-warm here to avoid cold start
 python -c "
-from lama_cleaner.model import LaMa
+from lama_cleaner.model.lama import LaMa
 m = LaMa(device='cuda')
 print('LaMa weights ready')
 "

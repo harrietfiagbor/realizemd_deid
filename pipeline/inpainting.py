@@ -16,7 +16,7 @@ def load_model(weights_dir: str, device: str = 'cuda'):
     """Load LaMa model. Call once at startup."""
     global _lama_model
     try:
-        from lama_cleaner.model import LaMa
+        from lama_cleaner.model.lama import LaMa
         from lama_cleaner.schema import Config as LamaConfig
         _lama_model = {
             'model': LaMa(device=device),
