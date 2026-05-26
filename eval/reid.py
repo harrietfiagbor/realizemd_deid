@@ -79,8 +79,10 @@ def embed(img_rgb: np.ndarray) -> np.ndarray:
     tensor = _transform(Image.fromarray(img_rgb)).unsqueeze(0).to(device)
     if hasattr(_retfound['model'], 'forward_features'):
         emb = _retfound['model'].forward_features(tensor)
+        print(f"DEBUG: model type = {type(_retfound['model'])}, emb shape = {emb.shape}")
     else:
         emb = _retfound['model'](tensor)
+        print(f"DEBUG: model type = {type(_retfound['model'])}, emb shape (fallback) = {emb.shape}")
     return emb[0].cpu().numpy()  # (1024,)
 
 
