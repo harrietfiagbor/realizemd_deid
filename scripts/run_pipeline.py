@@ -111,6 +111,11 @@ def main():
                 lesion_mask=lesion_result['combined'],
                 vessel_dilation_kernel=mask_cfg.get('dilation_kernel', 5),
             )
+            st = mask_result['stats']
+            tqdm.write(
+                f"  [{img_path.name}] Vessel mask: {st['vessel_pct']}% | "
+                f"Dilated: {st['vessel_dilated_pct']}% | Inpaint: {st['inpaint_pct']}%"
+            )
 
             # Inpaint
             deid = inpainting.inpaint(
