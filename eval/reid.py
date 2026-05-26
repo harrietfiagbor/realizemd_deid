@@ -165,8 +165,6 @@ def _compute_same_patient_auc(original_embeddings: dict,
     for i, s1 in enumerate(stems):
         e1 = deid_embeddings[s1]
         for j, s2 in enumerate(stems):
-            if i >= j:
-                continue
             e2 = original_embeddings[s2]
             sim = float(
                 np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2) + 1e-8)
