@@ -15,6 +15,14 @@ def load_model(weights_path: str):
     """Load Attention U-Net from .h5 weights. Call once at startup."""
     global _model
     import tensorflow as tf
+    
+    # Disable GPU for TensorFlow to bypass CuDNN version mismatch
+    try:
+        tf.config.set_visible_devices([], 'GPU')
+        print("✅ Disabled GPU for TensorFlow (segmentation will run on CPU)")
+    except Exception as e:
+        print(f"Note: Could not disable GPU for TensorFlow: {e}")
+
     try:
         import tf_keras as keras
     except ImportError:
@@ -38,8 +46,9 @@ def load_model(weights_path: str):
                 break
 
         from model import attentionunet
-        _model = attentionunet(input_shape=(512, 512, 1))
-        _model.load_weights(weights_path)
+        with tf.device('/cpu:0'):
+            _model = attentionunet(input_shape=(512, 512, 1))
+            _model.load_weights(weights_path)
         print(f'✅ Segmentation model loaded by reconstructing architecture')
     except Exception as e:
         print(f"⚠️  Could not reconstruct model architecture: {e}. Falling back to load_model...")
@@ -59,9 +68,11 @@ def load_model(weights_path: str):
             keras.config.enable_unsafe_deserialization()
 
         try:
-            _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
+            with tf.device('/cpu:0'):
+                _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
         except TypeError:
-            _model = keras.models.load_model(weights_path, compile=False)
+            with tf.device('/cpu:0'):
+                _model = keras.models.load_model(weights_path, compile=False)
         print(f'✅ Segmentation model loaded via load_model')
     print(f'   Input:  {_model.input_shape}')
     print(f'   Output: {_model.output_shape}')
@@ -82,6 +93,8 @@ def predict(preprocessed: dict, threshold: float = 0.5) -> np.ndarray:
     if _model is None:
         raise RuntimeError('Model not loaded. Call segmentation.load_model() first.')
 
+    import tensorflow as tf
+
     inp_shape = _model.input_shape
     n_channels = inp_shape[-1]
 
@@ -92,7 +105,8 @@ def predict(preprocessed: dict, threshold: float = 0.5) -> np.ndarray:
         img = preprocessed['enhanced_rgb'].astype(np.float32) / 255.0
         img = img[np.newaxis]                    # (1, H, W, 3)
 
-    pred = _model.predict(img, verbose=0)        # (1, H, W, 1)
+    with tf.device('/cpu:0'):
+        pred = _model.predict(img, verbose=0)        # (1, H, W, 1)
     mask = (pred[0, ..., 0] > threshold).astype(np.uint8) * 255
     return mask
 
