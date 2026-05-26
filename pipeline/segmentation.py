@@ -11,28 +11,47 @@ import cv2
 _model = None  # module-level singleton — load once, reuse
 
 
+
 def load_model(weights_path: str):
-    """Load Attention U-Net from .h5 weights. Call once at startup."""
+    """Load Attention U-Net from .h5 weights. Call once at startup.
+    Attempts direct loading; if that fails, falls back to reconstructing the architecture.
+    """
     global _model
     import tensorflow as tf
-    
-    # Disable GPU for TensorFlow to bypass CuDNN version mismatch
+    # Optional: force CPU for compatibility
     try:
         tf.config.set_visible_devices([], 'GPU')
         print("✅ Disabled GPU for TensorFlow (segmentation will run on CPU)")
     except Exception as e:
         print(f"Note: Could not disable GPU for TensorFlow: {e}")
-
+    # Import keras (support tf_keras fallback)
     try:
-        import tf_keras as keras
-    except ImportError:
         from tensorflow import keras
-
-    import sys
-    from pathlib import Path
-
-    # Try reconstructing model architecture and loading weights (to avoid bytecode compatibility issues)
+    except ImportError:
+        import tf_keras as keras
+    # First attempt: direct load (expects full model saved in .h5)
     try:
+        with tf.device('/cpu:0'):
+            _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
+        print(f"✅ Segmentation model loaded directly from {weights_path}")
+    except Exception as direct_err:
+        print(f"⚠️ Direct load failed: {direct_err}. Attempting reconstruction...")
+        # Monkey‑patch Conv2DTranspose for Keras‑3 compatibility (ignore 'groups')
+        try:
+            Conv2DTranspose = keras.layers.Conv2DTranspose
+            orig_init = Conv2DTranspose.__init__
+            def patched_init(self, *args, **kwargs):
+                kwargs.pop('groups', None)
+                return orig_init(self, *args, **kwargs)
+            Conv2DTranspose.__init__ = patched_init
+        except Exception as patch_err:
+            print(f"Note: Could not patch Conv2DTranspose: {patch_err}")
+        # Enable unsafe deserialization for Lambda layers (Keras‑3)
+        if hasattr(keras, 'config') and hasattr(keras.config, 'enable_unsafe_deserialization'):
+            keras.config.enable_unsafe_deserialization()
+        # Locate the original model definition (arkan_unet) if present
+        import sys
+        from pathlib import Path
         candidate_paths = [
             '/workspace/arkan_unet',
             '/workspace/realizemd_deid/arkan_unet',
@@ -44,36 +63,15 @@ def load_model(weights_path: str):
                 if str(path_obj) not in sys.path:
                     sys.path.insert(0, str(path_obj))
                 break
-
-        from model import attentionunet
-        with tf.device('/cpu:0'):
-            _model = attentionunet(input_shape=(512, 512, 1))
-            _model.load_weights(weights_path)
-        print(f'✅ Segmentation model loaded by reconstructing architecture')
-    except Exception as e:
-        print(f"⚠️  Could not reconstruct model architecture: {e}. Falling back to load_model...")
-        # Monkeypatch Conv2DTranspose to ignore 'groups' (Keras 3 compatibility workaround)
         try:
-            Conv2DTranspose = keras.layers.Conv2DTranspose
-            original_init = Conv2DTranspose.__init__
-            def patched_init(self, *args, **kwargs):
-                kwargs.pop('groups', None)
-                return original_init(self, *args, **kwargs)
-            Conv2DTranspose.__init__ = patched_init
-        except Exception as patch_err:
-            print(f"Note: Could not patch Conv2DTranspose: {patch_err}")
-
-        # Enable unsafe deserialization for Lambda layers in Keras 3
-        if hasattr(keras, 'config') and hasattr(keras.config, 'enable_unsafe_deserialization'):
-            keras.config.enable_unsafe_deserialization()
-
-        try:
+            from model import attentionunet
             with tf.device('/cpu:0'):
-                _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
-        except TypeError:
-            with tf.device('/cpu:0'):
-                _model = keras.models.load_model(weights_path, compile=False)
-        print(f'✅ Segmentation model loaded via load_model')
+                _model = attentionunet(input_shape=(512, 512, 1))
+                _model.load_weights(weights_path)
+            print("✅ Segmentation model reconstructed and weights loaded")
+        except Exception as recon_err:
+            print(f"⚠️ Reconstruction also failed: {recon_err}")
+            raise RuntimeError(f"Failed to load segmentation model from {weights_path}")
     print(f'   Input:  {_model.input_shape}')
     print(f'   Output: {_model.output_shape}')
     return _model
