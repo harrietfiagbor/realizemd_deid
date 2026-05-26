@@ -75,13 +75,16 @@ def embed(img_rgb: np.ndarray) -> np.ndarray:
     """Get 1024-dim RETFound embedding from an RGB image."""
     if _retfound is None:
         raise RuntimeError('RETFound not loaded. Call reid.load_retfound() first.')
-    device = _retfound['device']
-    tensor = _transform(Image.fromarray(img_rgb)).unsqueeze(0).to(device)
     if hasattr(_retfound['model'], 'forward_features'):
-        import inspect
-        src = inspect.getsource(_retfound['model'].forward_features)
-        raise ValueError(f"FORCE STOP - DEBUG:\n{src}")
-    return emb[0].cpu().numpy()  # (1024,)
+        emb = _retfound['model'].forward_features(tensor)
+    else:
+        emb = _retfound['model'](tensor)
+    
+    emb = emb.squeeze()
+    if emb.ndim > 1:
+        emb = emb[0]  # Take the CLS token if sequence is still present
+        
+    return emb.cpu().numpy()  # (1024,)
 
 
 def embed_batch(image_dict: dict) -> dict:
