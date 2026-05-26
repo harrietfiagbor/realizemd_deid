@@ -12,7 +12,7 @@ preprocessing:
 
 segmentation:
   model: attention_unet     # attention_unet (Model A)
-  weights: models/attention_unet/AttentionUNet.h5
+  weights: models/attention_unet/Trained models/retina_attentionUnet_150epochs.hdf5
   input_channels: 1         # green channel only
   threshold: 0.5
 
