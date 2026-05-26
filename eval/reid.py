@@ -43,6 +43,20 @@ def load_retfound(weights_path: str, retfound_dir: str, device: str = 'cuda'):
         )
 
     model = constructor(num_classes=0, global_pool=True)
+
+    # Monkeypatch forward_features to be compatible with newer timm versions
+    try:
+        import inspect
+        original_forward_features = model.forward_features
+        sig = inspect.signature(original_forward_features)
+        if 'attn_mask' not in sig.parameters and 'kwargs' not in sig.parameters:
+            def patched_forward_features(x, *args, **kwargs):
+                return original_forward_features(x)
+            model.forward_features = patched_forward_features
+            print("✅ Patched RETFound forward_features for timm compatibility")
+    except Exception as patch_err:
+        print(f"Note: Could not patch forward_features: {patch_err}")
+
     checkpoint = torch.load(weights_path, map_location='cpu')
 
     # Handle different checkpoint formats
