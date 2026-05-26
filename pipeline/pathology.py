@@ -67,8 +67,8 @@ def detect_haemorrhages(img_rgb: np.ndarray,
                         green_threshold: int = 80,
                         min_area: int = 30,
                         max_area: int = 2000,
-                        min_circ: float = 0.4,
-                        max_ecc: float = 0.85) -> np.ndarray:
+                        min_circularity: float = 0.4,
+                        max_eccentricity: float = 0.85) -> np.ndarray:
     """
     Dark red blobs. High R/low G. Shape filter removes vessel fragments.
     """
@@ -84,7 +84,7 @@ def detect_haemorrhages(img_rgb: np.ndarray,
         if min_area <= region.area <= max_area:
             sized[labeled == region.label] = 255
 
-    return _filter_by_shape(sized, min_circ=min_circ, max_ecc=max_ecc)
+    return _filter_by_shape(sized, min_circ=min_circularity, max_ecc=max_eccentricity)
 
 
 def detect_microaneurysms(img_rgb: np.ndarray,
@@ -93,8 +93,8 @@ def detect_microaneurysms(img_rgb: np.ndarray,
                           threshold: int = 20,
                           min_area: int = 8,
                           max_area: int = 50,
-                          min_circ: float = 0.45,
-                          max_ecc: float = 0.80) -> np.ndarray:
+                          min_circularity: float = 0.45,
+                          max_eccentricity: float = 0.80) -> np.ndarray:
     """
     Tiny dark red dots. Black top-hat morphology + shape filter.
     """
@@ -110,7 +110,7 @@ def detect_microaneurysms(img_rgb: np.ndarray,
         if min_area <= region.area <= max_area:
             sized[labeled == region.label] = 255
 
-    return _filter_by_shape(sized, min_circ=min_circ, max_ecc=max_ecc)
+    return _filter_by_shape(sized, min_circ=min_circularity, max_ecc=max_eccentricity)
 
 
 def detect_all(img_rgb: np.ndarray, cfg: dict = None) -> dict:
