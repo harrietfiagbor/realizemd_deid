@@ -36,24 +36,13 @@ pip install -q \
 
 echo "✅ Python packages installed"
 
-# ── Kaggle credentials ────────────────────────────────────────────────────────
-mkdir -p ~/.kaggle
-cat > ~/.kaggle/kaggle.json << 'KAGGLE'
-{"username":"adjoadede33","key":"KGAT_8abb244b54efbba9afc7f3a802af4408"}
-KAGGLE
-chmod 600 ~/.kaggle/kaggle.json
-echo "✅ Kaggle credentials configured"
-
 # ── Download EyePACS test images ──────────────────────────────────────────────
+export KAGGLE_API_TOKEN='KGAT_8abb244b54efbba9afc7f3a802af4408'
 mkdir -p /workspace/data/images
-echo "Downloading EyePACS test.zip.001 (~1 GB)..."
 kaggle competitions download -c diabetic-retinopathy-detection \
     -f test.zip.001 -p /workspace/data/
-
-echo "Extracting images..."
 7z e /workspace/data/test.zip.001 -o/workspace/data/images/ "*.jpeg" -r -y
-echo "✅ EyePACS images ready at /workspace/data/images/"
-echo "   $(ls /workspace/data/images/ | wc -l) images extracted"
+echo "Done: $(ls /workspace/data/images/ | wc -l) images"
 
 # ── Download Model A weights (arkanivasarkar Attention U-Net) ─────────────────
 mkdir -p /workspace/models
