@@ -9,7 +9,7 @@ echo "=== RealizeMD De-identification Pipeline — RunPod Setup ==="
 
 # ── System deps ───────────────────────────────────────────────────────────────
 apt-get update -q
-apt-get install -q -y git libgl1-mesa-glx libglib2.0-0 p7zip-full
+apt-get install -q -y git libgl1-mesa-glx libglib2.0-0 p7zip-full unzip
 
 # ── Python deps ───────────────────────────────────────────────────────────────
 pip install -q \
@@ -37,12 +37,23 @@ pip install -q \
 echo "✅ Python packages installed"
 
 # ── Download EyePACS test images ──────────────────────────────────────────────
-export KAGGLE_API_TOKEN='KGAT_8abb244b54efbba9afc7f3a802af4408'
+export KAGGLE_USERNAME="adjoadede33"
+export KAGGLE_KEY="KGAT_8abb244b54efbba9afc7f3a802af4408"
+
 mkdir -p /workspace/data/images
 kaggle competitions download -c diabetic-retinopathy-detection \
     -f test.zip.001 -p /workspace/data/
-7z e /workspace/data/test.zip.001 -o/workspace/data/images/ "*.jpeg" -r -y
-echo "Done: $(ls /workspace/data/images/ | wc -l) images"
+
+# This handles the nested zip wrapper you found
+unzip -o /workspace/data/test.zip.001.zip -d /workspace/data/images/
+
+# This extracts the JPEGs. The "|| true" ensures it doesn't crash on the 'Unexpected end' error
+7z e /workspace/data/images/test.zip.001 -o/workspace/data/images/ "*.jpeg" -r -y || true
+
+# Cleanup to keep your workspace from getting full
+rm -f /workspace/data/test.zip.001.zip /workspace/data/images/test.zip.001
+
+echo "Done: $(ls /workspace/data/images/test/ | wc -l) images"
 
 # ── Download Model A weights (arkanivasarkar Attention U-Net) ─────────────────
 mkdir -p /workspace/models
@@ -81,16 +92,7 @@ echo "=== Setup complete — everything is ready ==="
 echo ""
 echo "De-identify:"
 echo "  python scripts/run_pipeline.py \\"
-echo "      --input   /workspace/data/images/ \\"
+echo "      --input   /workspace/data/images/test/ \\"
 echo "      --output  /workspace/data/deid/ \\"
 echo "      --weights '/workspace/models/attention_unet/AttentionUNet.h5' \\"
 echo "      --device  cuda"
-echo ""
-echo "Evaluate:"
-echo "  python scripts/run_eval.py \\"
-echo "      --original /workspace/data/images/ \\"
-echo "      --deid     /workspace/data/deid/ \\"
-echo "      --output   /workspace/evals/scorecards/ \\"
-echo "      --weights  /workspace/models/RETFound_mae_natureCFP.pth \\"
-echo "      --retfound /workspace/RETFound \\"
-echo "      --device   cuda"
