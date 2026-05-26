@@ -66,10 +66,16 @@ def main():
         mask_dir.mkdir(exist_ok=True)
 
     # Load models
+    # Resolve weight path relative to project root
     weights_path = args.weights or cfg.get('segmentation', {}).get('weights')
     if not weights_path:
         raise ValueError('Provide --weights or set segmentation.weights in config')
-    segmentation.load_model(weights_path)
+    # Convert to absolute path if needed
+    weights_path = Path(weights_path)
+    if not weights_path.is_absolute():
+        # Assume path is relative to the repository root
+        weights_path = Path(__file__).resolve().parents[1] / weights_path
+    segmentation.load_model(str(weights_path))
     inpainting.load_model(
         cfg.get('inpainting', {}).get('weights', ''),
         device=args.device
