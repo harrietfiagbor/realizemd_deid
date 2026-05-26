@@ -15,7 +15,10 @@ def load_model(weights_path: str):
     """Load Attention U-Net from .h5 weights. Call once at startup."""
     global _model
     import tensorflow as tf
-    from tensorflow import keras
+    try:
+        import tf_keras as keras
+    except ImportError:
+        from tensorflow import keras
     _model = keras.models.load_model(weights_path, compile=False)
     print(f'✅ Segmentation model loaded')
     print(f'   Input:  {_model.input_shape}')
