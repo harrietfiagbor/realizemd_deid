@@ -9,6 +9,20 @@ from datetime import date
 from pathlib import Path
 
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        import numpy as np
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
+
+
 def generate(model_name: str,
              reid_results: dict,
              utility_results: dict,
@@ -115,7 +129,7 @@ OVERALL: {'✅ PASS' if overall_pass else '❌ FAIL'}
             'utility':  utility_results,
             'realism':  realism_results,
             'overall_pass': overall_pass,
-        }, indent=2))
+        }, indent=2, cls=NumpyEncoder))
 
         print(f'Scorecard saved: {txt_path}')
 
