@@ -31,7 +31,7 @@ def load_retfound(weights_path: str, retfound_dir: str, device: str = 'cuda'):
 
     # Find the right constructor — API varies by repo version
     constructor = None
-    for name in ['vit_large_patch16', 'vit_large', 'create_model']:
+    for name in ['RETFound_mae', 'RETFound_dinov2', 'vit_large_patch16', 'vit_large', 'create_model']:
         if hasattr(models_vit, name):
             constructor = getattr(models_vit, name)
             break
