@@ -20,26 +20,49 @@ def load_model(weights_path: str):
     except ImportError:
         from tensorflow import keras
 
-    # Monkeypatch Conv2DTranspose to ignore 'groups' (Keras 3 compatibility workaround)
+    import sys
+    from pathlib import Path
+
+    # Try reconstructing model architecture and loading weights (to avoid bytecode compatibility issues)
     try:
-        Conv2DTranspose = keras.layers.Conv2DTranspose
-        original_init = Conv2DTranspose.__init__
-        def patched_init(self, *args, **kwargs):
-            kwargs.pop('groups', None)
-            return original_init(self, *args, **kwargs)
-        Conv2DTranspose.__init__ = patched_init
+        candidate_paths = [
+            '/workspace/arkan_unet',
+            '/workspace/realizemd_deid/arkan_unet',
+            str(Path(__file__).parent.parent.parent / 'arkan_unet'),
+        ]
+        for p in candidate_paths:
+            path_obj = Path(p).resolve()
+            if path_obj.exists():
+                if str(path_obj) not in sys.path:
+                    sys.path.insert(0, str(path_obj))
+                break
+
+        from model import attentionunet
+        _model = attentionunet(input_shape=(512, 512, 1))
+        _model.load_weights(weights_path)
+        print(f'✅ Segmentation model loaded by reconstructing architecture')
     except Exception as e:
-        print(f"Note: Could not patch Conv2DTranspose: {e}")
+        print(f"⚠️  Could not reconstruct model architecture: {e}. Falling back to load_model...")
+        # Monkeypatch Conv2DTranspose to ignore 'groups' (Keras 3 compatibility workaround)
+        try:
+            Conv2DTranspose = keras.layers.Conv2DTranspose
+            original_init = Conv2DTranspose.__init__
+            def patched_init(self, *args, **kwargs):
+                kwargs.pop('groups', None)
+                return original_init(self, *args, **kwargs)
+            Conv2DTranspose.__init__ = patched_init
+        except Exception as patch_err:
+            print(f"Note: Could not patch Conv2DTranspose: {patch_err}")
 
-    # Enable unsafe deserialization for Lambda layers in Keras 3
-    if hasattr(keras, 'config') and hasattr(keras.config, 'enable_unsafe_deserialization'):
-        keras.config.enable_unsafe_deserialization()
+        # Enable unsafe deserialization for Lambda layers in Keras 3
+        if hasattr(keras, 'config') and hasattr(keras.config, 'enable_unsafe_deserialization'):
+            keras.config.enable_unsafe_deserialization()
 
-    try:
-        _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
-    except TypeError:
-        _model = keras.models.load_model(weights_path, compile=False)
-    print(f'✅ Segmentation model loaded')
+        try:
+            _model = keras.models.load_model(weights_path, compile=False, safe_mode=False)
+        except TypeError:
+            _model = keras.models.load_model(weights_path, compile=False)
+        print(f'✅ Segmentation model loaded via load_model')
     print(f'   Input:  {_model.input_shape}')
     print(f'   Output: {_model.output_shape}')
     return _model
