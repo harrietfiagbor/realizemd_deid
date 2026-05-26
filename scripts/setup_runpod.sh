@@ -1,7 +1,8 @@
 #!/bin/bash
 # scripts/setup_runpod.sh
 # One-shot environment setup for RunPod GPU instance
-# Run once after spinning up the instance
+# Run ONCE after spinning up the instance:
+#   bash scripts/setup_runpod.sh
 
 set -e
 echo "=== RealizeMD De-identification Pipeline — RunPod Setup ==="
@@ -30,18 +31,40 @@ pip install -q \
     lama-cleaner \
     pyyaml \
     einops \
-    timm
+    timm \
+    kaggle
 
 echo "✅ Python packages installed"
 
+# ── Kaggle credentials ────────────────────────────────────────────────────────
+mkdir -p ~/.kaggle
+cat > ~/.kaggle/kaggle.json << 'KAGGLE'
+{"username":"adjoadede33","key":"KGAT_8abb244b54efbba9afc7f3a802af4408"}
+KAGGLE
+chmod 600 ~/.kaggle/kaggle.json
+echo "✅ Kaggle credentials configured"
+
+# ── Download EyePACS test images ──────────────────────────────────────────────
+mkdir -p /workspace/data/images
+echo "Downloading EyePACS test.zip.001 (~1 GB)..."
+kaggle competitions download -c diabetic-retinopathy-detection \
+    -f test.zip.001 -p /workspace/data/
+
+echo "Extracting images..."
+7z e /workspace/data/test.zip.001 -o/workspace/data/images/ "*.jpeg" -r -y
+echo "✅ EyePACS images ready at /workspace/data/images/"
+echo "   $(ls /workspace/data/images/ | wc -l) images extracted"
+
 # ── Download Model A weights (arkanivasarkar Attention U-Net) ─────────────────
 mkdir -p /workspace/models
-git clone --quiet https://github.com/arkanivasarkar/Retinal-Vessel-Segmentation-using-variants-of-UNET \
+git clone --quiet \
+    https://github.com/arkanivasarkar/Retinal-Vessel-Segmentation-using-variants-of-UNET \
     /workspace/arkan_unet
 cp -r "/workspace/arkan_unet/Trained models/" /workspace/models/attention_unet/
 echo "✅ Model A weights ready at /workspace/models/attention_unet/"
+echo "   Available: $(ls '/workspace/models/attention_unet/')"
 
-# ── Download RETFound weights ─────────────────────────────────────────────────
+# ── Download RETFound ─────────────────────────────────────────────────────────
 git clone --quiet https://github.com/rmaphoh/RETFound /workspace/RETFound
 python -c "
 from huggingface_hub import hf_hub_download
@@ -55,8 +78,7 @@ print('RETFound weights:', path)
 echo "✅ RETFound weights ready"
 
 # ── Download LaMa weights ─────────────────────────────────────────────────────
-# lama-cleaner downloads weights automatically on first run
-# Pre-download to avoid cold-start delay
+# lama-cleaner auto-downloads on first use — pre-warm here to avoid cold start
 python -c "
 from lama_cleaner.model import LaMa
 m = LaMa(device='cuda')
@@ -64,6 +86,22 @@ print('LaMa weights ready')
 "
 echo "✅ LaMa weights ready"
 
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
-echo "=== Setup complete ==="
-echo "Run: python scripts/run_pipeline.py --input /data/images/ --output /data/deid/"
+echo "=== Setup complete — everything is ready ==="
+echo ""
+echo "De-identify:"
+echo "  python scripts/run_pipeline.py \\"
+echo "      --input   /workspace/data/images/ \\"
+echo "      --output  /workspace/data/deid/ \\"
+echo "      --weights '/workspace/models/attention_unet/AttentionUNet.h5' \\"
+echo "      --device  cuda"
+echo ""
+echo "Evaluate:"
+echo "  python scripts/run_eval.py \\"
+echo "      --original /workspace/data/images/ \\"
+echo "      --deid     /workspace/data/deid/ \\"
+echo "      --output   /workspace/evals/scorecards/ \\"
+echo "      --weights  /workspace/models/RETFound_mae_natureCFP.pth \\"
+echo "      --retfound /workspace/RETFound \\"
+echo "      --device   cuda"
