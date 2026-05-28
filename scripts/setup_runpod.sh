@@ -40,8 +40,12 @@ echo "✅ Python packages installed"
 if ls /workspace/data/eyepacs/images/*.jpeg 1> /dev/null 2>&1; then
     echo "✅ EyePACS test images already present at /workspace/data/eyepacs/images/, skipping download."
 else
-    export KAGGLE_USERNAME="adjoadede33"
-    export KAGGLE_KEY="KGAT_8abb244b54efbba9afc7f3a802af4408"
+    if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
+        echo "❌ Error: Kaggle credentials are missing. Set them before running setup:"
+        echo "   export KAGGLE_USERNAME=\"your_username\""
+        echo "   export KAGGLE_KEY=\"your_api_key\""
+        exit 1
+    fi
 
     mkdir -p /workspace/data/eyepacs/images
     kaggle competitions download -c diabetic-retinopathy-detection \
