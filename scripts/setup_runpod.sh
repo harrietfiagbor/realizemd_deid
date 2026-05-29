@@ -24,11 +24,12 @@ pip install -q \
     pandas \
     numpy \
     omegaconf \
-    huggingface_hub \
+    "huggingface_hub<0.26.0" \
     transformers \
     lpips \
     pytorch-fid \
-    lama-cleaner \
+    diffusers \
+    accelerate \
     pyyaml \
     einops \
     timm \
@@ -115,13 +116,13 @@ print('RETFound weights:', path)
 fi
 
 # ── Download LaMa weights ─────────────────────────────────────────────────────
-# lama-cleaner auto-downloads on first use — pre-warm here to avoid cold start
-python -c "
-from lama_cleaner.model.lama import LaMa
-m = LaMa(device='cuda')
-print('LaMa weights ready')
-"
-echo "✅ LaMa weights ready"
+# (Commented out: replaced by SD inpainting)
+# python -c "
+# from lama_cleaner.model.lama import LaMa
+# m = LaMa(device='cuda')
+# print('LaMa weights ready')
+# "
+# echo "✅ LaMa weights ready"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
