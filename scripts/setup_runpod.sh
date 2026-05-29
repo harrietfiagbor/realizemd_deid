@@ -32,7 +32,9 @@ pip install -q \
     pyyaml \
     einops \
     timm \
-    kaggle
+    kaggle \
+    segmentation-models-pytorch \
+    albumentations
 
 echo "✅ Python packages installed"
 

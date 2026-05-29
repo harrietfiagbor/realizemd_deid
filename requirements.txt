@@ -18,3 +18,5 @@ lama-cleaner>=1.0.0
 pyyaml>=6.0
 einops>=0.6.0
 timm>=0.9.0
+segmentation-models-pytorch>=0.3.3
+albumentations>=1.3.0
