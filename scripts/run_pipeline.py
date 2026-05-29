@@ -59,7 +59,8 @@ def main():
     print(f'Found {len(image_paths)} images')
 
     # Output dirs
-    output_dir = Path(args.output)
+    model_type = cfg.get('inpainting', {}).get('model', 'sd').strip().lower()
+    output_dir = Path(args.output) / model_type
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.save_masks:
         mask_dir = output_dir / 'masks'
