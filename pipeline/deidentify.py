@@ -24,7 +24,7 @@ def deidentify(image_rgb: np.ndarray,
       2. Segment vessels (Model A)
       3. Detect pathology (rule-based)
       4. Build inpaint mask (vessels - lesions, dilated)
-      5. LaMa inpainting
+      5. SD inpainting
 
     Args:
         image_rgb:           uint8 (H, W, 3) RGB image
@@ -38,11 +38,11 @@ def deidentify(image_rgb: np.ndarray,
         OR dict with 'deid_image' + all intermediates if return_intermediates=True
     """
     cfg = cfg or {}
-    pp_cfg  = cfg.get('preprocessing', {})
-    seg_cfg = cfg.get('segmentation', {})
+    pp_cfg   = cfg.get('preprocessing', {})
+    seg_cfg  = cfg.get('segmentation', {})
     mask_cfg = cfg.get('vessel_mask', {})
     path_cfg = cfg.get('pathology', {})
-    inp_cfg = cfg.get('inpainting', {})
+    inp_cfg  = cfg.get('inpainting', {})
 
     # ── 1. Load + preprocess ─────────────────────────────────────────────────
     if img_path is not None:

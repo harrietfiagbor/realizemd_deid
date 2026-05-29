@@ -78,10 +78,10 @@ def main():
     print(f"🔧 Using segmentation weights at: {weights_path}")
     # Load segmentation model
     segmentation.load_model(str(weights_path))
-    # Load inpainting model
+    # Load inpainting model — passes full inpainting cfg so SD params are available
     inpainting.load_model(
-        cfg.get('inpainting', {}).get('weights', ''),
-        device=args.device
+        cfg=cfg.get('inpainting', {}),
+        device=args.device,
     )
 
     # Reference image for histogram normalisation

@@ -1,122 +1,116 @@
 """
 pipeline/inpainting.py
-LaMa inpainting wrapper.
-Fills vessel mask regions with plausible retinal background texture.
+Stable Diffusion Inpainting wrapper (Path A — Phase 1).
+Replaces LaMa for vessel mask inpainting.
+
+Phase 1: vanilla SD inpainting, no ControlNet.
+Phase 2 (ControlNet) can be added by extending load_model() and inpaint()
+with a controlnet_image argument — the rest of the pipeline is unchanged.
+
+Model and all inference params are driven from configs/default.yaml
+under the `inpainting:` key.
 """
 
-import cv2
 import numpy as np
-from pathlib import Path
+import cv2
+from PIL import Image
 
 
-_lama_model = None
+_sd_pipe = None
 
 
-def load_model(weights_dir: str, device: str = 'cuda'):
-    """Load LaMa model. Call once at startup."""
-    global _lama_model
-    try:
-        from lama_cleaner.model.lama import LaMa
-        from lama_cleaner.schema import Config as LamaConfig
-        _lama_model = {
-            'model': LaMa(device=device),
-            'device': device,
-            'backend': 'lama_cleaner',
-        }
-        print(f'✅ LaMa loaded via lama-cleaner (device={device})')
-    except ImportError:
-        # Fallback: try loading LaMa directly from big-lama repo
-        import torch
-        import sys
-        sys.path.insert(0, str(Path(weights_dir).parent))
-        _lama_model = {
-            'weights_dir': weights_dir,
-            'device': device,
-            'backend': 'direct',
-        }
-        print(f'✅ LaMa loaded directly (device={device})')
-    return _lama_model
+def load_model(cfg: dict = None, device: str = 'cuda'):
+    """
+    Load SD inpainting pipeline. Call once at startup.
+
+    Args:
+        cfg:    inpainting config dict (from default.yaml `inpainting:` block)
+        device: cuda | cpu
+    """
+    global _sd_pipe
+
+    cfg = cfg or {}
+    model_id = cfg.get('sd_model', 'runwayml/stable-diffusion-inpainting')
+
+    import torch
+    from diffusers import StableDiffusionInpaintPipeline
+
+    print(f'Loading SD inpainting model: {model_id} ...')
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+        safety_checker=None,   # safe to disable for medical content
+    ).to(device)
+
+    # Slight memory saving with no quality loss
+    pipe.enable_attention_slicing()
+
+    _sd_pipe = {
+        'pipe':   pipe,
+        'device': device,
+        'cfg':    cfg,
+    }
+
+    print(f'✅ SD inpainting loaded (device={device})')
+    return _sd_pipe
 
 
 def inpaint(image_rgb: np.ndarray,
             mask: np.ndarray,
-            device: str = 'cuda') -> np.ndarray:
+            device: str = 'cuda',
+            seed: int = None) -> np.ndarray:
     """
-    Run LaMa inpainting on a single image.
+    Run SD inpainting on a single image.
 
     Args:
-        image_rgb: uint8 (H, W, 3) — original image
-        mask:      uint8 (H, W) — inpaint mask (255 = fill, 0 = keep)
+        image_rgb: uint8 (H, W, 3) RGB — original fundus image
+        mask:      uint8 (H, W)    — inpaint mask (255 = fill, 0 = keep)
         device:    cuda | cpu
+        seed:      random seed for reproducibility.
+                   None = random per image (recommended for privacy —
+                   different seed = different synthetic vessels).
 
     Returns:
-        uint8 (H, W, 3) — de-identified image
+        uint8 (H, W, 3) RGB — de-identified image
     """
-    if _lama_model is None:
-        raise RuntimeError('LaMa not loaded. Call inpainting.load_model() first.')
+    if _sd_pipe is None:
+        raise RuntimeError('SD pipeline not loaded. Call inpainting.load_model() first.')
 
-    if _lama_model['backend'] == 'lama_cleaner':
-        from lama_cleaner.schema import Config as LamaConfig
-        model = _lama_model['model']
-        cfg = LamaConfig(
-            ldm_steps=20,
-            ldm_sampler='plms',
-            zits_wireframe=False,
-            hd_strategy='Resize',
-            hd_strategy_crop_margin=32,
-            hd_strategy_crop_trigger_size=512,
-            hd_strategy_resize_limit=512,
-        )
-        result = model(image_rgb, mask, cfg)
-        # Ensure the output is uint8 for OpenCV compatibility
-        if np.issubdtype(result.dtype, np.floating):
-            if result.max() <= 1.0:
-                result = result * 255.0
-            result = np.clip(result, 0, 255).astype(np.uint8)
-        else:
-            result = result.astype(np.uint8)
-        return result
+    import torch
 
-    elif _lama_model['backend'] == 'direct':
-        # Direct LaMa call — handles the model loading and inference
-        import torch
-        from PIL import Image
-        import torchvision.transforms as T
+    pipe = _sd_pipe['pipe']
+    cfg  = _sd_pipe['cfg']
 
-        weights_dir = _lama_model['weights_dir']
+    prompt          = cfg.get('prompt', '').strip()
+    negative_prompt = cfg.get('negative_prompt', '').strip()
+    steps           = int(cfg.get('num_inference_steps', 50))
+    guidance_scale  = float(cfg.get('guidance_scale', 7.5))
+    strength        = float(cfg.get('strength', 1.0))
 
-        # Convert to tensors
-        img_tensor = T.ToTensor()(Image.fromarray(image_rgb)).unsqueeze(0)
-        mask_tensor = T.ToTensor()(Image.fromarray(mask)).unsqueeze(0)
-        mask_tensor = (mask_tensor > 0.5).float()
+    # SD expects PIL images at 512×512
+    h, w = image_rgb.shape[:2]
+    pil_image = Image.fromarray(image_rgb).resize((512, 512))
+    pil_mask  = Image.fromarray(mask).resize((512, 512), resample=Image.NEAREST)
 
-        img_tensor  = img_tensor.to(device)
-        mask_tensor = mask_tensor.to(device)
+    if seed is None:
+        seed = int(torch.randint(0, 2**31, (1,)).item())
 
-        # Masked input to model
-        masked = img_tensor * (1 - mask_tensor)
+    generator = torch.Generator(device=device).manual_seed(seed)
 
-        with torch.no_grad():
-            # Load model if needed
-            from omegaconf import OmegaConf
-            from saicinpainting.training.trainers import load_checkpoint
+    result_pil = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        image=pil_image,
+        mask_image=pil_mask,
+        num_inference_steps=steps,
+        guidance_scale=guidance_scale,
+        strength=strength,
+        generator=generator,
+    ).images[0]
 
-            train_config_path = Path(weights_dir) / 'config.yaml'
-            cfg = OmegaConf.load(train_config_path)
-            cfg.training_model.predict_only = True
-            cfg.visualizer.kind = 'noop'
-
-            checkpoint_path = Path(weights_dir) / 'models' / 'best.ckpt'
-            model = load_checkpoint(cfg, str(checkpoint_path), strict=False, map_location=device)
-            model.eval()
-            model.to(device)
-
-            batch = {'image': masked, 'mask': mask_tensor}
-            result_batch = model(batch)
-            result = result_batch['inpainted'][0].permute(1, 2, 0).cpu().numpy()
-            result = (result * 255).clip(0, 255).astype(np.uint8)
-
-        return result
+    # Resize back to original resolution and return as numpy uint8
+    result_np = np.array(result_pil.resize((w, h), resample=Image.LANCZOS))
+    return result_np.astype(np.uint8)
 
 
 def inpaint_batch(image_paths: list,
@@ -135,6 +129,7 @@ def inpaint_batch(image_paths: list,
     Returns:
         list of output paths
     """
+    from pathlib import Path
     from tqdm import tqdm
 
     output_dir = Path(output_dir)
@@ -149,10 +144,9 @@ def inpaint_batch(image_paths: list,
 
         img = cv2.imread(str(path))
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img_rgb = cv2.resize(img_rgb, (512, 512))
 
         mask = mask_dict[stem]
-        result = inpaint(img_rgb, mask, device=device)
+        result = inpaint(img_rgb, mask, device=device)  # seed=None → random per image
 
         out_path = output_dir / f'{stem}_deid.png'
         cv2.imwrite(str(out_path), cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
