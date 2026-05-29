@@ -24,7 +24,7 @@ pip install -q \
     pandas \
     numpy \
     omegaconf \
-    huggingface_hub \
+    "huggingface_hub<0.26.0" \
     transformers \
     lpips \
     pytorch-fid \
