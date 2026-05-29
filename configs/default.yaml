@@ -42,7 +42,7 @@ pathology:
   lesion_dilation_kernel: 3
 
 inpainting:
-  model: lama                  # sd | lama
+  model: sd                 # sd | lama
   device: cuda
 
   # Stable Diffusion Inpainting (Phase 1)
