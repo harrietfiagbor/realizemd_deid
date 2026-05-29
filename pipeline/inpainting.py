@@ -17,19 +17,30 @@ from PIL import Image
 
 
 _sd_pipe = None
+_active_backend = None
 
 
 def load_model(cfg: dict = None, device: str = 'cuda'):
     """
-    Load SD inpainting pipeline. Call once at startup.
+    Load inpainting pipeline (SD or LaMa). Call once at startup.
 
     Args:
         cfg:    inpainting config dict (from default.yaml `inpainting:` block)
         device: cuda | cpu
     """
-    global _sd_pipe
+    global _sd_pipe, _active_backend
 
     cfg = cfg or {}
+    model_type = cfg.get('model', 'sd').strip().lower()
+    _active_backend = model_type
+
+    if model_type == 'lama':
+        from pipeline import inpainting_lama
+        weights_dir = cfg.get('lama_weights', 'models/big-lama/')
+        print(f"Switching inpainting backend to LaMa (weights: {weights_dir})")
+        return inpainting_lama.load_model(weights_dir=weights_dir, device=device)
+
+    # Otherwise, load SD inpainting
     model_id = cfg.get('sd_model', 'runwayml/stable-diffusion-inpainting')
 
     import torch
@@ -60,19 +71,21 @@ def inpaint(image_rgb: np.ndarray,
             device: str = 'cuda',
             seed: int = None) -> np.ndarray:
     """
-    Run SD inpainting on a single image.
+    Run inpainting on a single image using the active backend.
 
     Args:
         image_rgb: uint8 (H, W, 3) RGB — original fundus image
         mask:      uint8 (H, W)    — inpaint mask (255 = fill, 0 = keep)
         device:    cuda | cpu
-        seed:      random seed for reproducibility.
-                   None = random per image (recommended for privacy —
-                   different seed = different synthetic vessels).
+        seed:      random seed (only used by SD backend)
 
     Returns:
         uint8 (H, W, 3) RGB — de-identified image
     """
+    if _active_backend == 'lama':
+        from pipeline import inpainting_lama
+        return inpainting_lama.inpaint(image_rgb=image_rgb, mask=mask, device=device)
+
     if _sd_pipe is None:
         raise RuntimeError('SD pipeline not loaded. Call inpainting.load_model() first.')
 
@@ -118,7 +131,7 @@ def inpaint_batch(image_paths: list,
                   output_dir: str,
                   device: str = 'cuda') -> list:
     """
-    Batch inpainting over a list of image paths.
+    Batch inpainting over a list of image paths using the active backend.
 
     Args:
         image_paths: list of Path objects
@@ -129,6 +142,10 @@ def inpaint_batch(image_paths: list,
     Returns:
         list of output paths
     """
+    if _active_backend == 'lama':
+        from pipeline import inpainting_lama
+        return inpainting_lama.inpaint_batch(image_paths=image_paths, mask_dict=mask_dict, output_dir=output_dir, device=device)
+
     from pathlib import Path
     from tqdm import tqdm
 
