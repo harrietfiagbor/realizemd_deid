@@ -116,28 +116,50 @@ def preprocess_for_training(img_bgr: np.ndarray) -> np.ndarray:
 
 # ── Patch extraction ──────────────────────────────────────────────────────────
 
-def extract_patches(image: np.ndarray, mask: np.ndarray,
-                    patch: int = 768, n_pos: int = 8, n_neg: int = 4):
-    """
-    Oversample lesion-containing patches.
-    Returns list of (img_patch [H,W,3], mask_patch [H,W]).
-    """
-    H, W   = mask.shape
-    ys, xs = np.where(mask > 0)
-    half   = patch // 2
+def _sample_patches_from_coords(image, mask, ys, xs, patch, half, n):
+    """Sample n patches centred near (ys, xs) pixel coordinates with jitter."""
     patches = []
+    H, W = mask.shape
+    for _ in range(n):
+        i  = random.randrange(len(ys))
+        cy = int(np.clip(ys[i] + random.randint(-half // 2, half // 2), half, H - half))
+        cx = int(np.clip(xs[i] + random.randint(-half // 2, half // 2), half, W - half))
+        y0, x0 = cy - half, cx - half
+        patches.append((image[y0:y0+patch, x0:x0+patch],
+                        mask[y0:y0+patch, x0:x0+patch]))
+    return patches
 
-    # Positive patches centred near lesion pixels
-    if len(ys) > 0:
-        for _ in range(n_pos):
-            i  = random.randrange(len(ys))
-            cy = int(np.clip(ys[i] + random.randint(-half // 2, half // 2), half, H - half))
-            cx = int(np.clip(xs[i] + random.randint(-half // 2, half // 2), half, W - half))
-            y0, x0 = cy - half, cx - half
-            patches.append((image[y0:y0+patch, x0:x0+patch],
-                            mask[y0:y0+patch, x0:x0+patch]))
 
-    # Random negative patches for background context
+def extract_patches(image: np.ndarray, mask: np.ndarray,
+                    patch: int = 768, n_pos: int = 8, n_neg: int = 4,
+                    vessel_mask: np.ndarray = None, n_vessel: int = 6):
+    """
+    Oversample HE-on-vessel patches first (hard + common case per the 72%
+    co-location finding), then remaining any-HE patches, then negatives.
+    Falls back to n_pos any-HE patches if no vessel_mask or no overlap.
+    """
+    H, W  = mask.shape
+    half  = patch // 2
+    patches = []
+    he_ys, he_xs = np.where(mask > 0)
+
+    if len(he_ys) > 0:
+        if vessel_mask is not None:
+            vm = cv2.resize(vessel_mask, (W, H), interpolation=cv2.INTER_NEAREST)
+            hov_ys, hov_xs = np.where((mask > 0) & (vm > 0))
+            if len(hov_ys) > 0:
+                patches += _sample_patches_from_coords(
+                    image, mask, hov_ys, hov_xs, patch, half, n_vessel)
+                remaining = max(0, n_pos - n_vessel)
+            else:
+                remaining = n_pos
+        else:
+            remaining = n_pos
+
+        if remaining > 0:
+            patches += _sample_patches_from_coords(
+                image, mask, he_ys, he_xs, patch, half, remaining)
+
     for _ in range(n_neg):
         y0 = random.randint(0, max(0, H - patch))
         x0 = random.randint(0, max(0, W - patch))
@@ -180,7 +202,9 @@ class HEDataset(Dataset):
 
     def _build_patches(self):
         self.patches = []
-        for img_path, mask_path in self.samples:
+        for item in self.samples:
+            img_path, mask_path = item[0], item[1]
+            vessel_path = item[2] if len(item) > 2 else None
             img_bgr = cv2.imread(str(img_path))
             if img_bgr is None:
                 continue
@@ -189,8 +213,10 @@ class HEDataset(Dataset):
             if mask is None:
                 mask = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
             mask = (mask > 0).astype(np.uint8) * 255
+            vm = cv2.imread(str(vessel_path), cv2.IMREAD_GRAYSCALE) if vessel_path else None
             for img_p, mask_p in extract_patches(
-                    img_rgb, mask, self.patch_size, self.n_pos, self.n_neg):
+                    img_rgb, mask, self.patch_size, self.n_pos, self.n_neg,
+                    vessel_mask=vm, n_vessel=6):
                 if img_p.shape[0] == self.patch_size and img_p.shape[1] == self.patch_size:
                     self.patches.append((img_p, mask_p))
 
@@ -214,24 +240,30 @@ class HEDataset(Dataset):
 
 # ── Data loading helpers ──────────────────────────────────────────────────────
 
-def load_idrid_samples(idrid_dir: Path, split: str = 'train'):
+def load_idrid_samples(idrid_dir: Path, split: str = 'train',
+                       vessel_mask_dir: Path = None):
     """
-    Returns list of (img_path, he_mask_path).
+    Returns list of (img_path, he_mask_path) or
+    (img_path, he_mask_path, vessel_mask_path) when vessel_mask_dir is given.
     split: 'train' (54 images) or 'test' (27 images).
+    Vessel masks should be named IDRiD_XX_vessel.png in vessel_mask_dir.
     """
     folder = 'a. Training Set' if split == 'train' else 'b. Testing Set'
     img_dir  = idrid_dir / '1. Original Images' / folder
     mask_dir = idrid_dir / '2. All Segmentation Groundtruths' / folder / '2. Haemorrhages'
     samples  = []
     for img_path in sorted(img_dir.glob('*.jpg')):
-        stem    = img_path.stem          # e.g. IDRiD_01
+        stem    = img_path.stem
         he_glob = list(mask_dir.glob(f'{stem}_HE.*'))
-        if he_glob:
-            samples.append((img_path, he_glob[0]))
+        if not he_glob:
+            continue
+        if vessel_mask_dir is not None:
+            vm_path = Path(vessel_mask_dir) / f'{stem}_vessel.png'
+            vm = vm_path if vm_path.exists() else None
+            samples.append((img_path, he_glob[0], vm))
         else:
-            samples.append((img_path, None))   # no HE GT for this image
-    # Drop images with no HE GT (healthy retinas contribute no positive signal)
-    return [(i, m) for i, m in samples if m is not None]
+            samples.append((img_path, he_glob[0]))
+    return samples
 
 
 def load_ddr_samples(ddr_dir: Path):
@@ -332,7 +364,8 @@ def train(args):
 
     # ── Data ──────────────────────────────────────────────────────────────────
     idrid_dir  = Path(args.idrid_dir)
-    train_samp = load_idrid_samples(idrid_dir, split='train')
+    vessel_dir = Path(args.vessel_mask_dir) if args.vessel_mask_dir else None
+    train_samp = load_idrid_samples(idrid_dir, split='train', vessel_mask_dir=vessel_dir)
     val_samp   = load_idrid_samples(idrid_dir, split='test')
 
     if args.ddr_dir:
@@ -437,8 +470,11 @@ def parse_args():
     p = argparse.ArgumentParser(description='Train learned HE detector')
     p.add_argument('--idrid_dir',     required=True,
                    help='Path to IDRiD A. Segmentation/A. Segmentation dir')
-    p.add_argument('--ddr_dir',       default=None,
+    p.add_argument('--ddr_dir',        default=None,
                    help='Path to DDR dataset root (optional)')
+    p.add_argument('--vessel_mask_dir', default=None,
+                   help='Dir of precomputed vessel masks (IDRiD_XX_vessel.png). '
+                        'Used to oversample HE-on-vessel patches.')
     p.add_argument('--out_dir',       default='models/he_detector')
     p.add_argument('--encoder',       default='efficientnet-b4')
     p.add_argument('--epochs',        type=int,   default=80)
