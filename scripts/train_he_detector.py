@@ -11,7 +11,7 @@ Data: IDRiD-train + DDR (HE only). IDRiD-test held out for final eval.
 
 Usage (RunPod or local GPU):
     python scripts/train_he_detector.py \
-        --idrid_dir  /workspace/data/idrid/A.\ Segmentation/A.\ Segmentation \
+        --idrid_dir  "/workspace/data/idrid/A. Segmentation/A. Segmentation" \
         --ddr_dir    /workspace/data/ddr \
         --out_dir    /workspace/models/he_detector \
         --epochs     80 \
