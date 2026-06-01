@@ -474,6 +474,14 @@ def train(args):
                             'state_dict': model.state_dict(),
                             'threshold': args.threshold}, str(ckpt))
                 print(f"  ✓ New best saved: recall={recall:.4f}  preservation={mean_pres:.4f}  combined={combined:.4f}")
+                if args.drive_dir:
+                    import subprocess as _sp
+                    r = _sp.run(['rclone', 'copy', str(ckpt), args.drive_dir],
+                                capture_output=True, text=True)
+                    if r.returncode == 0:
+                        print(f"  ✓ Backed up to Drive: {args.drive_dir}")
+                    else:
+                        print(f"  ⚠ Drive backup failed: {r.stderr.strip()}")
             else:
                 no_improve += 1
                 print(f"  no improvement ({no_improve}/{patience})")
@@ -520,6 +528,9 @@ def parse_args():
     p.add_argument('--target_recall', type=float, default=0.70)
     p.add_argument('--patience',      type=int,   default=10,
                    help='Early-stop patience in validation checks (5 epochs each).')
+    p.add_argument('--drive_dir',     default=None,
+                   help='rclone remote path to back up best checkpoint on each improvement '
+                        '(e.g. "gdrive:he_detector_v2/he_run4/"). Requires rclone configured.')
     return p.parse_args()
 
 
