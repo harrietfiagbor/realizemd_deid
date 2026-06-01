@@ -356,19 +356,14 @@ def validate(model: nn.Module, val_samples: list, args, device: str):
         img_bgr = cv2.imread(str(img_path))
         if img_bgr is None:
             continue
-        img_rgb = preprocess_for_training(img_bgr)
-        H, W    = img_rgb.shape[:2]
-        scale   = min(1.0, 2048 / max(H, W))
-        img_s   = cv2.resize(img_rgb, (int(W*scale), int(H*scale)))
-        pred    = sliding_window_predict(
-            model, img_s,
-            patch=args.patch_size, stride=args.patch_size // 2,
+        img_rgb  = preprocess_for_training(img_bgr)
+        pred     = sliding_window_predict(
+            model, img_rgb,
+            patch=args.patch_size, stride=640,
             threshold=args.threshold, device=device)
         pred_bin = (pred > 0).astype(np.uint8)
 
-        gt = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        gt = cv2.resize(gt, (int(W*scale), int(H*scale)),
-                        interpolation=cv2.INTER_NEAREST)
+        gt     = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         gt_bin = (gt > 0).astype(np.uint8)
 
         _, hits, n_gt = recall_at_iou(pred_bin, gt_bin)
