@@ -73,7 +73,30 @@ class FocalTverskyLoss(nn.Module):
         return (1 - tversky) ** self.gamma
 
 
+class DiceLoss(nn.Module):
+    """Soft Dice loss — directly optimises pixel-level overlap (preservation)."""
+    def __init__(self, smooth: float = 1.0):
+        super().__init__()
+        self.smooth = smooth
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        probs   = torch.sigmoid(logits).view(-1)
+        targets = targets.view(-1).float()
+        inter   = (probs * targets).sum()
+        return 1 - (2 * inter + self.smooth) / (
+            probs.sum() + targets.sum() + self.smooth
+        )
+
+
 # ── Metric ───────────────────────────────────────────────────────────────────
+
+def pixel_preservation(pred_bin: np.ndarray, gt_bin: np.ndarray) -> float | None:
+    """Fraction of GT lesion pixels covered by prediction mask."""
+    total = int(gt_bin.sum())
+    if total == 0:
+        return None
+    return float((gt_bin & pred_bin).sum()) / total
+
 
 def recall_at_iou(pred_bin: np.ndarray, gt_bin: np.ndarray,
                   iou_thresh: float = 0.3):
@@ -323,17 +346,17 @@ def sliding_window_predict(model: nn.Module, img_rgb: np.ndarray,
 def validate(model: nn.Module, val_samples: list, args, device: str):
     """
     Full-image sliding-window inference on val set.
-    Returns aggregate recall@IoU=0.3.
+    Returns (recall@IoU=0.3, hits, total_gt_blobs, mean_pixel_preservation).
     """
     model.eval()
     hits_total = 0
     gt_total   = 0
+    pres_vals  = []
     for img_path, mask_path in val_samples:
         img_bgr = cv2.imread(str(img_path))
         if img_bgr is None:
             continue
         img_rgb = preprocess_for_training(img_bgr)
-        # Resize to manageable size for validation speed (keep aspect)
         H, W    = img_rgb.shape[:2]
         scale   = min(1.0, 2048 / max(H, W))
         img_s   = cv2.resize(img_rgb, (int(W*scale), int(H*scale)))
@@ -352,8 +375,13 @@ def validate(model: nn.Module, val_samples: list, args, device: str):
         hits_total += hits
         gt_total   += n_gt
 
-    recall = hits_total / max(gt_total, 1)
-    return recall, hits_total, gt_total
+        p = pixel_preservation(pred_bin, gt_bin)
+        if p is not None:
+            pres_vals.append(p)
+
+    recall    = hits_total / max(gt_total, 1)
+    mean_pres = float(np.mean(pres_vals)) if pres_vals else 0.0
+    return recall, hits_total, gt_total, mean_pres
 
 
 # ── Training loop ─────────────────────────────────────────────────────────────
@@ -391,7 +419,8 @@ def train(args):
     print(f"Model: Unet + {args.encoder}")
 
     # ── Optimiser + schedule ──────────────────────────────────────────────────
-    criterion = FocalTverskyLoss(alpha=args.alpha, beta=1 - args.alpha)
+    criterion_ft   = FocalTverskyLoss(alpha=args.alpha, beta=1 - args.alpha)
+    criterion_dice = DiceLoss()
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -400,9 +429,9 @@ def train(args):
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    best_recall  = 0.0
-    no_improve   = 0
-    patience     = args.patience
+    best_combined = 0.0
+    no_improve    = 0
+    patience      = args.patience
 
     print(f"\nStarting training — {args.epochs} epochs, patience={patience}")
     print(f"Target: recall@IoU=0.3 >= {args.target_recall}\n")
@@ -420,7 +449,7 @@ def train(args):
             masks = masks.to(device)
             optimiser.zero_grad()
             logits = model(imgs)
-            loss   = criterion(logits, masks)
+            loss   = criterion_ft(logits, masks) + criterion_dice(logits, masks)
             loss.backward()
             optimiser.step()
             epoch_loss += loss.item()
@@ -430,18 +459,21 @@ def train(args):
 
         # Validate every 5 epochs (full-image sliding window is slow)
         if epoch % 5 == 0 or epoch == 1:
-            recall, hits, total = validate(model, val_samp, args, device)
+            recall, hits, total, mean_pres = validate(model, val_samp, args, device)
+            combined = recall * mean_pres
             print(f"Epoch {epoch:03d} | loss={avg_loss:.4f} | "
-                  f"val recall@IoU=0.3: {recall:.4f} ({hits}/{total})")
+                  f"recall={recall:.4f} ({hits}/{total}) | "
+                  f"preservation={mean_pres:.4f} | combined={combined:.4f}")
 
-            if recall > best_recall:
-                best_recall = recall
-                no_improve  = 0
+            if combined > best_combined:
+                best_combined = combined
+                no_improve    = 0
                 ckpt = out_dir / 'he_detector_best.pth'
                 torch.save({'epoch': epoch, 'recall': recall,
+                            'preservation': mean_pres, 'combined': combined,
                             'state_dict': model.state_dict(),
                             'threshold': args.threshold}, str(ckpt))
-                print(f"  ✓ New best saved: {ckpt.name}  recall={recall:.4f}")
+                print(f"  ✓ New best saved: recall={recall:.4f}  preservation={mean_pres:.4f}  combined={combined:.4f}")
             else:
                 no_improve += 1
                 print(f"  no improvement ({no_improve}/{patience})")
@@ -456,11 +488,11 @@ def train(args):
             print(f"Epoch {epoch:03d} | loss={avg_loss:.4f}")
 
     # Save final checkpoint
-    torch.save({'epoch': epoch, 'recall': best_recall,
+    torch.save({'epoch': epoch, 'combined': best_combined,
                 'state_dict': model.state_dict(),
                 'threshold': args.threshold},
                str(out_dir / 'he_detector_final.pth'))
-    print(f"\nBest val recall@IoU=0.3: {best_recall:.4f}")
+    print(f"\nBest combined (recall × preservation): {best_combined:.4f}")
     print(f"Checkpoints saved to: {out_dir}")
 
 
