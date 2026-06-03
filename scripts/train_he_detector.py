@@ -413,9 +413,9 @@ def train(args):
     print(f"Val   samples (with HE GT): {len(val_samp)}")
 
     train_ds = HEDataset(train_samp, patch_size=args.patch_size,
-                         augment=True,  n_pos=8, n_neg=4)
+                         augment=True,  n_pos=args.n_pos, n_neg=args.n_neg)
     train_dl = DataLoader(train_ds, batch_size=args.batch_size,
-                          shuffle=True, num_workers=4, pin_memory=True)
+                          shuffle=True, num_workers=0, pin_memory=False)
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = smp.Unet(
@@ -448,7 +448,7 @@ def train(args):
         # Resample patches each epoch for diversity
         train_ds.resample()
         train_dl = DataLoader(train_ds, batch_size=args.batch_size,
-                              shuffle=True, num_workers=4, pin_memory=True)
+                              shuffle=True, num_workers=0, pin_memory=False)
 
         model.train()
         epoch_loss = 0.0
@@ -534,6 +534,10 @@ def parse_args():
     p.add_argument('--threshold',     type=float, default=0.35,
                    help='Probability threshold at inference. Tune on val.')
     p.add_argument('--target_recall', type=float, default=0.70)
+    p.add_argument('--n_pos',         type=int,   default=3,
+                   help='Positive patches per image per epoch.')
+    p.add_argument('--n_neg',         type=int,   default=1,
+                   help='Negative patches per image per epoch.')
     p.add_argument('--patience',      type=int,   default=10,
                    help='Early-stop patience in validation checks (5 epochs each).')
     p.add_argument('--drive_dir',     default=None,
