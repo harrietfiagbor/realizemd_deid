@@ -17,7 +17,7 @@ segmentation:
   threshold: 0.5
 
 vessel_mask:
-  dilation_kernel: 3       # px — supervisor target: 8-12% coverage
+  dilation_kernel: 20       # px — supervisor target: 8-12% coverage
 
 pathology:
   optic_disc_threshold: 220
@@ -42,23 +42,35 @@ pathology:
   lesion_dilation_kernel: 3
 
 inpainting:
-  model: sd                 # sd | lama
+  model: sd_controlnet       # sd_controlnet | lama
   device: cuda
 
-  # Stable Diffusion Inpainting (Phase 1)
+  # Path C — SD + ControlNet
   sd_model: runwayml/stable-diffusion-inpainting
+  controlnet_model: lllyasviel/sd-controlnet-scribble
   num_inference_steps: 50
   guidance_scale: 7.5
-  strength: 1.0              # fully replace masked region — do not lower below 1.0
-  prompt: >
-    high quality color fundus photograph, retinal vasculature,
-    sharp focus, medical photography, ophthalmology, healthy retina,
-    natural blood vessels, retinal tissue
-  negative_prompt: >
-    blurry, low quality, abstract, painting, illustration, cartoon,
-    blue tint, gray, smooth, blob, artifact, distorted, unnatural
+  strength: 1.0
+  controlnet_conditioning_scale: 0.6   # sweep: 0.4 / 0.5 / 0.6 / 0.7
 
-  # LaMa fallback (Phase 0 — kept for reference)
+  prompt: >
+    high quality color fundus photograph, retinal blood vessels,
+    dark red burgundy vessels on red-orange retinal background,
+    sharp focus, medical photography, ophthalmology, no text, no watermark
+  negative_prompt: >
+    blurry, low quality, abstract, painting, illustration,
+    blue tint, gray, smooth, blob, chalk, white lines, ink strokes,
+    high contrast lines, unnatural colors, watermark, text, signature
+
+  # Vessel pattern deformation (Option B)
+  vessel_pattern:
+    elastic_alpha: 200
+    elastic_sigma: 20
+    rotate_min: 15
+    rotate_max: 60
+    flip_prob: 0.3
+
+  # LaMa fallback (kept for reference)
   lama_weights: models/big-lama/
 
 eval:
