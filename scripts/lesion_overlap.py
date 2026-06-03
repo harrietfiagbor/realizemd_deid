@@ -233,7 +233,12 @@ def main():
         list(Path(args.images).rglob('*.jpg')) +
         list(Path(args.images).rglob('*.jpeg'))
     )
-    image_paths = [p for p in image_paths if not any(part.startswith('.') for part in p.parts)]
+    image_paths = [
+        p for p in image_paths
+        if '.ipynb_checkpoints' not in p.parts
+        and not any(part.startswith('.') for part in p.parts)
+        and '-checkpoint' not in p.name
+    ]
     if args.n:
         image_paths = image_paths[:args.n]
 

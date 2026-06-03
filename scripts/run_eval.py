@@ -51,7 +51,9 @@ def load_images(folder: Path, suffix: str = '', n: int = None, stems_to_keep: se
     # Filter out hidden folders/files and jupyter checkpoints
     paths = [
         p for p in paths
-        if '.ipynb_checkpoints' not in p.parts and not any(part.startswith('.') for part in p.parts)
+        if '.ipynb_checkpoints' not in p.parts
+        and not any(part.startswith('.') for part in p.parts)
+        and '-checkpoint' not in p.name
     ]
     if suffix:
         paths = [p for p in paths if p.stem.endswith(suffix)]
@@ -87,7 +89,9 @@ def main():
     # Filter out hidden folders/files and jupyter checkpoints
     candidate_paths = [
         p for p in candidate_paths
-        if '.ipynb_checkpoints' not in p.parts and not any(part.startswith('.') for part in p.parts)
+        if '.ipynb_checkpoints' not in p.parts
+        and not any(part.startswith('.') for part in p.parts)
+        and '-checkpoint' not in p.name
     ]
     # Check if there's an expected suffix from the current config
     dil = cfg.get('vessel_mask', {}).get('dilation_kernel', 5)
