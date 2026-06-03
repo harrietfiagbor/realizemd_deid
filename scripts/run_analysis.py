@@ -24,6 +24,18 @@ import segmentation_models_pytorch as smp
 from skimage import measure as sk_measure
 
 
+# ── Preprocessing ─────────────────────────────────────────────────────────────
+
+def preprocess_for_training(img_bgr: np.ndarray) -> np.ndarray:
+    """CLAHE on L channel — must match training preprocessing exactly."""
+    img_rgb  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    lab      = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
+    l, a, b  = cv2.split(lab)
+    clahe    = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = cv2.merge([clahe.apply(l), a, b])
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2RGB)
+
+
 # ── Inference ─────────────────────────────────────────────────────────────────
 
 def get_prob_map(mdl, img_rgb, patch=768, stride=640, device="cpu"):
@@ -150,7 +162,7 @@ def main(args):
         stem    = img_path.stem
         gt_path = next(test_he_dir.glob(f"{stem}_HE.*"), None)
         gt      = cv2.imread(str(gt_path), cv2.IMREAD_GRAYSCALE) if gt_path else None
-        img     = cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB)
+        img     = preprocess_for_training(cv2.imread(str(img_path)))
         print(f"  {stem}")
         prob_maps[stem] = (get_prob_map_tta(model, img, args.patch, args.stride, device)
                            if args.tta else
