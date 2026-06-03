@@ -59,7 +59,8 @@ def main():
     print(f'Found {len(image_paths)} images')
 
     # Output dirs
-    output_dir = Path(args.output)
+    model_type = cfg.get('inpainting', {}).get('model', 'sd').strip().lower()
+    output_dir = Path(args.output) / model_type
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.save_masks:
         mask_dir = output_dir / 'masks'
@@ -78,10 +79,10 @@ def main():
     print(f"🔧 Using segmentation weights at: {weights_path}")
     # Load segmentation model
     segmentation.load_model(str(weights_path))
-    # Load inpainting model
+    # Load inpainting model — passes full inpainting cfg so SD params are available
     inpainting.load_model(
-        cfg.get('inpainting', {}).get('weights', ''),
-        device=args.device
+        cfg=cfg.get('inpainting', {}),
+        device=args.device,
     )
 
     # Reference image for histogram normalisation

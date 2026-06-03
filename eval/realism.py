@@ -40,10 +40,11 @@ def compute_ssim_lpips(original_images: dict,
         if orig.shape != deid.shape:
             deid = cv2.resize(deid, (orig.shape[1], orig.shape[0]))
 
-        # SSIM
-        orig_gray = cv2.cvtColor(orig, cv2.COLOR_RGB2GRAY)
-        deid_gray = cv2.cvtColor(deid, cv2.COLOR_RGB2GRAY)
-        ssim_val = float(ssim_fn(orig_gray, deid_gray, data_range=255))
+        # SSIM — computed on RGB (channel_axis=2) so colour shifts
+        # (e.g. global blue cast from inpainting) are correctly penalised.
+        # Y-channel SSIM is intentionally avoided: it misses colour artifacts
+        # and produced a false-positive 0.85 on the LaMa blue-blob failure.
+        ssim_val = float(ssim_fn(orig, deid, data_range=255, channel_axis=2))
 
         row = {'stem': stem, 'ssim': round(ssim_val, 4)}
 

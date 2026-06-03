@@ -17,7 +17,7 @@ segmentation:
   threshold: 0.5
 
 vessel_mask:
-  dilation_kernel: 20       # px — supervisor target: 8-12% coverage
+  dilation_kernel: 3       # px — supervisor target: 8-12% coverage
 
 pathology:
   optic_disc_threshold: 220
@@ -42,9 +42,24 @@ pathology:
   lesion_dilation_kernel: 3
 
 inpainting:
-  model: lama
-  weights: models/big-lama/
+  model: sd                 # sd | lama
   device: cuda
+
+  # Stable Diffusion Inpainting (Phase 1)
+  sd_model: runwayml/stable-diffusion-inpainting
+  num_inference_steps: 50
+  guidance_scale: 7.5
+  strength: 1.0              # fully replace masked region — do not lower below 1.0
+  prompt: >
+    high quality color fundus photograph, retinal vasculature,
+    sharp focus, medical photography, ophthalmology, healthy retina,
+    natural blood vessels, retinal tissue
+  negative_prompt: >
+    blurry, low quality, abstract, painting, illustration, cartoon,
+    blue tint, gray, smooth, blob, artifact, distorted, unnatural
+
+  # LaMa fallback (Phase 0 — kept for reference)
+  lama_weights: models/big-lama/
 
 eval:
   reid:
