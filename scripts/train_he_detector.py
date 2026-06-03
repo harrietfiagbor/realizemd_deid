@@ -289,20 +289,30 @@ def load_idrid_samples(idrid_dir: Path, split: str = 'train',
     return samples
 
 
-def load_ddr_samples(ddr_dir: Path):
+def load_ddr_samples(ddr_split_dir: Path):
     """
-    DDR dataset layout: ddr_dir/image/<id>.jpg, ddr_dir/label/HE/<id>.png
-    Returns list of (img_path, he_mask_path).
+    DDR split layout: ddr_split_dir/image/<id>.jpg
+    Masks: ddr_split_dir/label/HE/<id>.tif  (train)
+        or ddr_split_dir/segmentation label/HE/<id>.tif  (valid)
+    Returns list of (img_path, he_mask_path) with non-blank masks only.
     """
-    img_dir  = ddr_dir / 'image'
-    mask_dir = ddr_dir / 'label' / 'HE'
+    img_dir = ddr_split_dir / 'image'
     if not img_dir.exists():
         return []
+    # Handle differing label folder names across splits
+    for label_folder in ('label', 'segmentation label'):
+        mask_dir = ddr_split_dir / label_folder / 'HE'
+        if mask_dir.exists():
+            break
     samples = []
     for img_path in sorted(img_dir.glob('*.jpg')):
-        mask_path = mask_dir / (img_path.stem + '.png')
-        if mask_path.exists():
-            samples.append((img_path, mask_path))
+        for ext in ('.tif', '.png'):
+            mask_path = mask_dir / (img_path.stem + ext)
+            if mask_path.exists():
+                mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                if mask is not None and mask.max() > 0:
+                    samples.append((img_path, mask_path))
+                break
     return samples
 
 
@@ -392,8 +402,11 @@ def train(args):
     val_samp   = load_idrid_samples(idrid_dir, split='test')
 
     if args.ddr_dir:
-        ddr_samp = load_ddr_samples(Path(args.ddr_dir))
-        print(f"DDR samples: {len(ddr_samp)}")
+        ddr_root = Path(args.ddr_dir)
+        ddr_train = load_ddr_samples(ddr_root / 'train')
+        ddr_valid = load_ddr_samples(ddr_root / 'valid')
+        ddr_samp  = ddr_train + ddr_valid
+        print(f"DDR samples: {len(ddr_samp)} ({len(ddr_train)} train + {len(ddr_valid)} valid)")
         train_samp = train_samp + ddr_samp
 
     print(f"Train samples (with HE GT): {len(train_samp)}")
