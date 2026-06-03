@@ -18,9 +18,9 @@ import numpy as np
 from PIL import Image
 
 
-def deform_vessel_pattern(vessel_mask: np.ndarray,
-                          cfg: dict = None,
-                          seed: int = None) -> np.ndarray:
+def deform_vessel_pattern(
+    vessel_mask: np.ndarray, cfg: dict = None, seed: int = None
+) -> np.ndarray:
     """
     Apply elastic deformation + rotation + optional flip to a vessel mask
     to produce a topologically distinct conditioning pattern for ControlNet.
@@ -34,27 +34,27 @@ def deform_vessel_pattern(vessel_mask: np.ndarray,
     Returns:
         uint8 (H, W) deformed binary vessel mask, same shape as input
     """
-    cfg  = cfg or {}
-    rng  = np.random.RandomState(seed)
+    cfg = cfg or {}
+    rng = np.random.RandomState(seed)
 
-    alpha       = cfg.get('elastic_alpha', 200)   # displacement magnitude
-    sigma       = cfg.get('elastic_sigma', 20)    # smoothness of displacement
-    rotate_min  = cfg.get('rotate_min', 15)
-    rotate_max  = cfg.get('rotate_max', 60)
-    flip_prob   = cfg.get('flip_prob', 0.3)
+    alpha = cfg.get("elastic_alpha", 200)  # displacement magnitude
+    sigma = cfg.get("elastic_sigma", 20)  # smoothness of displacement
+    rotate_min = cfg.get("rotate_min", 15)
+    rotate_max = cfg.get("rotate_max", 60)
+    flip_prob = cfg.get("flip_prob", 0.3)
 
     h, w = vessel_mask.shape[:2]
 
     # ── 1. Elastic deformation ────────────────────────────────────────────────
     # Random displacement fields, smoothed by Gaussian
-    dx = cv2.GaussianBlur(
-        (rng.rand(h, w) * 2 - 1).astype(np.float32),
-        (0, 0), sigma
-    ) * alpha
-    dy = cv2.GaussianBlur(
-        (rng.rand(h, w) * 2 - 1).astype(np.float32),
-        (0, 0), sigma
-    ) * alpha
+    dx = (
+        cv2.GaussianBlur((rng.rand(h, w) * 2 - 1).astype(np.float32), (0, 0), sigma)
+        * alpha
+    )
+    dy = (
+        cv2.GaussianBlur((rng.rand(h, w) * 2 - 1).astype(np.float32), (0, 0), sigma)
+        * alpha
+    )
 
     # Remap coordinates
     x_coords, y_coords = np.meshgrid(np.arange(w), np.arange(h))
@@ -63,7 +63,8 @@ def deform_vessel_pattern(vessel_mask: np.ndarray,
 
     deformed = cv2.remap(
         vessel_mask.astype(np.float32),
-        map_x, map_y,
+        map_x,
+        map_y,
         interpolation=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
@@ -78,7 +79,9 @@ def deform_vessel_pattern(vessel_mask: np.ndarray,
 
     M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, scale=1.0)
     deformed = cv2.warpAffine(
-        deformed, M, (w, h),
+        deformed,
+        M,
+        (w, h),
         flags=cv2.INTER_NEAREST,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
@@ -91,10 +94,12 @@ def deform_vessel_pattern(vessel_mask: np.ndarray,
     return deformed
 
 
-def build_control_image(vessel_mask: np.ndarray,
-                        inpaint_mask: np.ndarray,
-                        cfg: dict = None,
-                        seed: int = None) -> Image.Image:
+def build_control_image(
+    vessel_mask: np.ndarray,
+    inpaint_mask: np.ndarray,
+    cfg: dict = None,
+    seed: int = None,
+) -> Image.Image:
     """
     Build the ControlNet conditioning image (PIL RGB, 512×512).
 
@@ -120,6 +125,8 @@ def build_control_image(vessel_mask: np.ndarray,
     inpaint_binary = (inpaint_mask > 0).astype(np.uint8)
     deformed_masked = cv2.bitwise_and(deformed, deformed, mask=inpaint_binary)
 
-    # Convert to PIL RGB (ControlNet expects 3 channels)
-    control_rgb = cv2.cvtColor(deformed_masked, cv2.COLOR_GRAY2RGB)
+    # Invert: scribble ControlNet expects black lines on white background
+    # Original mask is white vessels on black — flip it
+    inverted = cv2.bitwise_not(deformed_masked)
+    control_rgb = cv2.cvtColor(inverted, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(control_rgb)
