@@ -439,12 +439,22 @@ def train(args):
 
     best_combined = 0.0
     no_improve    = 0
+    start_epoch   = 1
     patience      = args.patience
+
+    if args.resume:
+        ckpt_r = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt_r['state_dict'])
+        best_combined = ckpt_r.get('combined', 0.0)
+        start_epoch   = ckpt_r.get('epoch', 0) + 1
+        for _ in range(start_epoch - 1):
+            scheduler.step()
+        print(f"Resumed from epoch {start_epoch - 1}  best_combined={best_combined:.4f}")
 
     print(f"\nStarting training — {args.epochs} epochs, patience={patience}")
     print(f"Target: recall@IoU=0.3 >= {args.target_recall}\n")
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         # Resample patches each epoch for diversity
         train_ds.resample()
         train_dl = DataLoader(train_ds, batch_size=args.batch_size,
@@ -543,6 +553,8 @@ def parse_args():
     p.add_argument('--drive_dir',     default=None,
                    help='rclone remote path to back up best checkpoint on each improvement '
                         '(e.g. "gdrive:he_detector_v2/he_run4/"). Requires rclone configured.')
+    p.add_argument('--resume',        default=None,
+                   help='Path to checkpoint (.pth) to resume training from.')
     return p.parse_args()
 
 
