@@ -52,6 +52,15 @@ def load_model(cfg: dict = None, device: str = 'cuda'):
 
     pipe.enable_attention_slicing()
 
+    # LoRA fine-tune weights (optional — set lora_weights in config to enable)
+    lora_weights = cfg.get('lora_weights', None)
+    lora_scale   = float(cfg.get('lora_scale', 0.7))
+    if lora_weights:
+        print(f'Loading LoRA weights: {lora_weights} (scale={lora_scale}) ...')
+        pipe.load_lora_weights(lora_weights)
+        pipe.fuse_lora(lora_scale=lora_scale)
+        print('✅ LoRA fused')
+
     _sd_pipe = {
         'pipe':   pipe,
         'device': device,
