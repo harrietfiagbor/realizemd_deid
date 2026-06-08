@@ -388,7 +388,8 @@ def validate(model: nn.Module, val_samples: list, args, device: str):
     hits_total = 0
     gt_total   = 0
     pres_vals  = []
-    for img_path, mask_path in val_samples:
+    for item in val_samples:
+        img_path, mask_path = item[0], item[1]
         img_bgr = cv2.imread(str(img_path))
         if img_bgr is None:
             continue
