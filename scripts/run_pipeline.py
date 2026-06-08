@@ -111,13 +111,6 @@ def main():
         list(input_dir.rglob('*.jpg')) +
         list(input_dir.rglob('*.png'))
     )
-    # Filter out hidden files/folders, jupyter checkpoints, and checkpoint images
-    image_paths = [
-        p for p in image_paths
-        if '.ipynb_checkpoints' not in p.parts
-        and not any(part.startswith('.') for part in p.parts)
-        and '-checkpoint' not in p.name
-    ]
     if args.n:
         image_paths = image_paths[:args.n]
     print(f'Found {len(image_paths)} images')
