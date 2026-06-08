@@ -51,7 +51,7 @@ inpainting:
   num_inference_steps: 50
   guidance_scale: 7.5
   strength: 1.0
-  controlnet_conditioning_scale: 0.6   # sweep: 0.4 / 0.5 / 0.6 / 0.7
+  controlnet_conditioning_scale: 0.5   # sweep: 0.4 / 0.5 / 0.6 / 0.7
 
   prompt: >
     high quality color fundus photograph, retinal blood vessels,
