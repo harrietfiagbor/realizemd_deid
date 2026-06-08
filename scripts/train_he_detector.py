@@ -226,8 +226,10 @@ class HEDataset(Dataset):
     def _build_patches(self):
         self.patches = []
         for item in self.samples:
-            img_path, mask_path = item[0], item[1]
+            img_path    = item[0]
+            mask_path   = item[1]
             vessel_path = item[2] if len(item) > 2 else None
+            has_ex      = item[3] if len(item) > 3 else False
             img_bgr = cv2.imread(str(img_path))
             if img_bgr is None:
                 continue
@@ -236,9 +238,26 @@ class HEDataset(Dataset):
             if mask is None:
                 mask = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
             mask = (mask > 0).astype(np.uint8) * 255
+
+            # Stratified sampling: boost patch count for larger masks so
+            # large confluent HE (underrepresented in DDR) get equal coverage
+            mask_px = int((mask > 0).sum())
+            if mask_px < 1_000:
+                size_boost = 0      # small — already dominant, no boost
+            elif mask_px < 20_000:
+                size_boost = 2      # medium
+            else:
+                size_boost = 4      # large confluent HE (e.g. IDRiD_78 pattern)
+
+            # Hard-negative mining: extra patches from HE+EX images to fix
+            # HE/exudate confusion identified in GT audit
+            hn_boost = 2 if has_ex else 0
+
+            n_pos_eff = self.n_pos + size_boost + hn_boost
+
             vm = cv2.imread(str(vessel_path), cv2.IMREAD_GRAYSCALE) if vessel_path else None
             for img_p, mask_p in extract_patches(
-                    img_rgb, mask, self.patch_size, self.n_pos, self.n_neg,
+                    img_rgb, mask, self.patch_size, n_pos_eff, self.n_neg,
                     vessel_mask=vm, n_vessel=6):
                 if img_p.shape[0] == self.patch_size and img_p.shape[1] == self.patch_size:
                     self.patches.append((img_p, mask_p))
@@ -266,26 +285,33 @@ class HEDataset(Dataset):
 def load_idrid_samples(idrid_dir: Path, split: str = 'train',
                        vessel_mask_dir: Path = None):
     """
-    Returns list of (img_path, he_mask_path) or
-    (img_path, he_mask_path, vessel_mask_path) when vessel_mask_dir is given.
+    Returns list of (img_path, he_mask_path, vessel_path_or_None, has_ex).
+    has_ex=True when the image has a non-blank EX mask (hard-negative signal).
     split: 'train' (54 images) or 'test' (27 images).
     Vessel masks should be named IDRiD_XX_vessel.png in vessel_mask_dir.
     """
     folder = 'a. Training Set' if split == 'train' else 'b. Testing Set'
     img_dir  = idrid_dir / '1. Original Images' / folder
-    mask_dir = idrid_dir / '2. All Segmentation Groundtruths' / folder / '2. Haemorrhages'
+    he_dir   = idrid_dir / '2. All Segmentation Groundtruths' / folder / '2. Haemorrhages'
+    ex_dir   = idrid_dir / '2. All Segmentation Groundtruths' / folder / '3. Hard Exudates'
     samples  = []
     for img_path in sorted(img_dir.glob('*.jpg')):
         stem    = img_path.stem
-        he_glob = list(mask_dir.glob(f'{stem}_HE.*'))
+        he_glob = list(he_dir.glob(f'{stem}_HE.*'))
         if not he_glob:
             continue
+        # Hard-negative flag: image has both HE and EX annotations
+        has_ex = False
+        if ex_dir.exists():
+            ex_glob = list(ex_dir.glob(f'{stem}_EX.*'))
+            if ex_glob:
+                ex_mask = cv2.imread(str(ex_glob[0]), cv2.IMREAD_GRAYSCALE)
+                has_ex  = ex_mask is not None and ex_mask.max() > 0
+        vm = None
         if vessel_mask_dir is not None:
             vm_path = Path(vessel_mask_dir) / f'{stem}_vessel.png'
             vm = vm_path if vm_path.exists() else None
-            samples.append((img_path, he_glob[0], vm))
-        else:
-            samples.append((img_path, he_glob[0]))
+        samples.append((img_path, he_glob[0], vm, has_ex))
     return samples
 
 
@@ -311,7 +337,7 @@ def load_ddr_samples(ddr_split_dir: Path):
             if mask_path.exists():
                 mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                 if mask is not None and mask.max() > 0:
-                    samples.append((img_path, mask_path))
+                    samples.append((img_path, mask_path, None, False))
                 break
     return samples
 
