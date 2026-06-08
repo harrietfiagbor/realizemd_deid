@@ -72,6 +72,7 @@ def process_image(img_path, preprocessed, vessel_mask, lesion_result, mask_resul
             device=inp_cfg.get('device', device),
             seed=seed,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
+            fov=preprocessed['fov'],
         )
 
         out_path = output_dir / f'{img_path.stem}_deid_dil{dil}.png'

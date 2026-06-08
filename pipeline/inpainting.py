@@ -77,7 +77,8 @@ def inpaint(image_rgb: np.ndarray,
             control_image: Image.Image = None,
             device: str = 'cuda',
             seed: int = None,
-            controlnet_conditioning_scale: float = None) -> np.ndarray:
+            controlnet_conditioning_scale: float = None,
+            fov: tuple = None) -> np.ndarray:
     """
     Run SD + ControlNet inpainting on a single image.
 
@@ -92,6 +93,10 @@ def inpaint(image_rgb: np.ndarray,
         device:                       cuda | cpu
         seed:                         random seed. None = random per image.
         controlnet_conditioning_scale: override config value (used for sweep).
+        fov:                          (cx, cy, r) tuple from preprocessing.
+                                      If provided, SD output is hard-masked to
+                                      inside the FOV — prevents teal cast and
+                                      hallucinations in the dark border region.
 
     Returns:
         uint8 (H, W, 3) RGB de-identified image
@@ -153,4 +158,13 @@ def inpaint(image_rgb: np.ndarray,
     ).images[0]
 
     result_np = np.array(result_pil.resize((w, h), resample=Image.LANCZOS))
+
+    # Hard-mask result to FOV — zero out anything SD generated outside the retina
+    if fov is not None:
+        cx, cy, r = fov
+        fov_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(fov_mask, (cx, cy), r, 255, -1)
+        fov_3ch = fov_mask[:, :, np.newaxis] / 255.0
+        result_np = (result_np * fov_3ch).astype(np.uint8)
+
     return result_np.astype(np.uint8)
