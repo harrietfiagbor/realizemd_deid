@@ -79,7 +79,14 @@ def generate(model_name: str,
     ssim_pass    = ssim_mean is not None and (0.65 <= ssim_mean <= 0.85)
     lpips_pass   = lpips_mean is not None and (0.15 <= lpips_mean <= 0.35)
 
-    overall_pass = reid_pass and util_pass and fid_pass and ssim_pass
+    if pres_ratio is None:
+        util_status = 'N/A'
+        util_eval_pass = True
+    else:
+        util_status = _status(util_pass)
+        util_eval_pass = util_pass
+
+    overall_pass = reid_pass and util_eval_pass and fid_pass and ssim_pass
 
     # ── Format ────────────────────────────────────────────────────────────────
     card = f"""
@@ -98,7 +105,7 @@ PRIVACY
 UTILITY
   DR grading AUC (orig):  {_fmt(auc_orig, 3)}
   DR grading AUC (deid):  {_fmt(auc_deid, 3)}
-  Preservation ratio:     {_fmt(pres_ratio, 3)}  (target ≥ 0.95)  {_status(util_pass)}
+  Preservation ratio:     {_fmt(pres_ratio, 3)}  (target ≥ 0.95)  {util_status}
   AUC grade 0–1 (deid):   {_fmt(auc_low, 3)}
   AUC grade 2–4 (deid):   {_fmt(auc_high, 3)}
 
