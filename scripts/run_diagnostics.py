@@ -335,6 +335,8 @@ def diag2_baseline(args, cfg, out_root, batch=None):
 
     # ── Load RETFound ─────────────────────────────────────────────────────────
     print('\n  Loading RETFound embedder ...')
+    if args.retfound_dir and args.retfound_dir not in sys.path:
+        sys.path.insert(0, args.retfound_dir)
     reid.load_retfound(
         weights_path=args.retfound_weights,
         retfound_dir=args.retfound_dir,
@@ -439,6 +441,8 @@ def diag3_fid_curve(args, cfg, out_root, batch=None):
     # Load RETFound if available (for per-scale AUC)
     retfound_available = False
     if args.retfound_weights:
+        if args.retfound_dir and args.retfound_dir not in sys.path:
+            sys.path.insert(0, args.retfound_dir)
         try:
             reid.load_retfound(
                 weights_path=args.retfound_weights,
