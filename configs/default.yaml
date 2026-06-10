@@ -71,7 +71,8 @@ inpainting:
     flip_prob: 0.3
 
   # LoRA fine-tune weights (optional)
-  lora_weights: /workspace/fundus_lora_v1/pytorch_lora_weights.safetensors
+  # lora_weights: /workspace/fundus_lora_v1/pytorch_lora_weights.safetensors
+  lora_weights: /workspace/fundus_lora_v2/pytorch_lora_weights.safetensors
   lora_scale: 0.7   # 0.5-0.8; lower = less retinal style, higher = more
 
   # LaMa fallback (kept for reference)

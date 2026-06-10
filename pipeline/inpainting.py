@@ -57,8 +57,8 @@ def load_model(cfg: dict = None, device: str = 'cuda'):
     lora_scale   = float(cfg.get('lora_scale', 0.7))
     if lora_weights:
         print(f'Loading LoRA weights: {lora_weights} (scale={lora_scale}) ...')
-        pipe.load_lora_weights(lora_weights)
-        pipe.fuse_lora(lora_scale=lora_scale)
+        pipe.load_lora_weights(lora_weights, adapter_name="fundus")
+pipe.set_adapters(["fundus"], adapter_weights=[lora_scale])
         print('✅ LoRA fused')
 
     _sd_pipe = {
