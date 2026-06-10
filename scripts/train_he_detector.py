@@ -213,10 +213,10 @@ def build_aug(patch_size: int) -> A.Compose:
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
         A.ElasticTransform(alpha=40, sigma=6, p=0.3),
-        A.RandomBrightnessContrast(0.2, 0.2, p=0.5),
-        A.CLAHE(clip_limit=2.0, p=0.3),
-        A.GaussNoise(var_limit=(5, 25), p=0.2),
-        A.Resize(patch_size, patch_size, always_apply=True),
+        A.RandomBrightnessContrast(0.35, 0.35, p=0.5),
+        A.RandomGamma(gamma_limit=(60, 140), p=0.5),
+        A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=15, p=0.3),
+        A.Resize(patch_size, patch_size),
     ])
 
 
@@ -451,6 +451,7 @@ def train(args):
         encoder_weights = 'imagenet',
         in_channels     = 3,
         classes         = 1,
+        decoder_dropout = 0.2,
     ).to(device)
     print(f"Model: Unet + {args.encoder}")
 
@@ -458,7 +459,7 @@ def train(args):
     criterion_ft   = FocalTverskyLoss(alpha=args.alpha, beta=1 - args.alpha)
     criterion_dice = DiceLoss()
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr,
-                                  weight_decay=1e-4)
+                                  weight_decay=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimiser, T_max=args.epochs, eta_min=1e-6)
 
