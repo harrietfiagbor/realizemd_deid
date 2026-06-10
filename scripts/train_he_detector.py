@@ -157,29 +157,43 @@ def extract_patches(image: np.ndarray, mask: np.ndarray,
                     patch: int = 768, n_pos: int = 8, n_neg: int = 4,
                     vessel_mask: np.ndarray = None, n_vessel: int = 6):
     """
-    Oversample HE-on-vessel patches first (hard + common case per the 72%
-    co-location finding), then remaining any-HE patches, then negatives.
-    Falls back to n_pos any-HE patches if no vessel_mask or no overlap.
+    Per-blob stratified sampling: find each connected HE component, allocate
+    patches by blob size so every blob (including large confluent HE) gets
+    at least one centered patch. Large blobs get more patches than small ones.
+    Negatives sampled uniformly from background.
     """
-    H, W  = mask.shape
-    half  = patch // 2
+    H, W   = mask.shape
+    half   = patch // 2
     patches = []
-    he_ys, he_xs = np.where(mask > 0)
 
-    if len(he_ys) > 0:
-        if vessel_mask is not None:
-            vm = cv2.resize(vessel_mask, (W, H), interpolation=cv2.INTER_NEAREST)
-            hov_ys, hov_xs = np.where((mask > 0) & (vm > 0))
-            if len(hov_ys) > 0:
-                patches += _sample_patches_from_coords(
-                    image, mask, hov_ys, hov_xs, patch, half, n_vessel)
-                remaining = max(0, n_pos - n_vessel)
+    labeled = sk_measure.label(mask > 0)
+    regions = sk_measure.regionprops(labeled)
+
+    if regions:
+        # Allocate per-blob patch counts by size
+        def blob_count(area):
+            if area < 500:
+                return 1
+            elif area < 5000:
+                return 2
             else:
-                remaining = n_pos
-        else:
-            remaining = n_pos
+                return 3
 
+        blob_allocs = [(reg, blob_count(reg.area)) for reg in regions]
+        total_alloc = sum(n for _, n in blob_allocs)
+
+        # Scale down if total exceeds n_pos to stay within budget
+        scale = min(1.0, n_pos / max(total_alloc, 1))
+        for reg, n_blob in blob_allocs:
+            n_scaled = max(1, round(n_blob * scale))
+            blob_ys, blob_xs = np.where(labeled == reg.label)
+            patches += _sample_patches_from_coords(
+                image, mask, blob_ys, blob_xs, patch, half, n_scaled)
+
+        # Fill any remaining budget with any-HE patches
+        remaining = max(0, n_pos - len(patches))
         if remaining > 0:
+            he_ys, he_xs = np.where(mask > 0)
             patches += _sample_patches_from_coords(
                 image, mask, he_ys, he_xs, patch, half, remaining)
 
@@ -239,21 +253,8 @@ class HEDataset(Dataset):
                 mask = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
             mask = (mask > 0).astype(np.uint8) * 255
 
-            # Stratified sampling: boost patch count for larger masks so
-            # large confluent HE (underrepresented in DDR) get equal coverage
-            mask_px = int((mask > 0).sum())
-            if mask_px < 1_000:
-                size_boost = 0      # small — already dominant, no boost
-            elif mask_px < 20_000:
-                size_boost = 2      # medium
-            else:
-                size_boost = 4      # large confluent HE (e.g. IDRiD_78 pattern)
-
-            # Hard-negative mining: extra patches from HE+EX images to fix
-            # HE/exudate confusion identified in GT audit
-            hn_boost = 2 if has_ex else 0
-
-            n_pos_eff = self.n_pos + size_boost + hn_boost
+            # Hard-negative mining: extra patches from HE+EX images
+            n_pos_eff = self.n_pos + (2 if has_ex else 0)
 
             vm = cv2.imread(str(vessel_path), cv2.IMREAD_GRAYSCALE) if vessel_path else None
             for img_p, mask_p in extract_patches(
