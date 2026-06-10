@@ -215,7 +215,7 @@ def build_aug(patch_size: int) -> A.Compose:
         A.ElasticTransform(alpha=40, sigma=6, p=0.3),
         A.RandomBrightnessContrast(0.35, 0.35, p=0.5),
         A.RandomGamma(gamma_limit=(60, 140), p=0.5),
-        A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=15, p=0.3),
+        A.HueSaturationValue(hue_shift_limit=5, sat_shift_limit=10, val_shift_limit=10, p=0.3),
         A.Resize(patch_size, patch_size),
     ])
 
