@@ -17,7 +17,7 @@ segmentation:
   threshold: 0.5
 
 vessel_mask:
-  dilation_kernel: 8       # px — supervisor target: 8-12% coverage
+  dilation_kernel: 20       # px — supervisor target: 8-12% coverage
 
 pathology:
   optic_disc_threshold: 220
@@ -51,7 +51,7 @@ inpainting:
   num_inference_steps: 50
   guidance_scale: 7.5
   strength: 1.0
-  controlnet_conditioning_scale: 0.5   # sweep: 0.4 / 0.5 / 0.6 / 0.7
+  controlnet_conditioning_scale: 0.6   # sweep: 0.4 / 0.5 / 0.6 / 0.7
 
   prompt: >
     high quality color fundus photograph, retinal blood vessels,
@@ -71,8 +71,7 @@ inpainting:
     flip_prob: 0.3
 
   # LoRA fine-tune weights (optional)
-  # lora_weights: /workspace/fundus_lora_v1/pytorch_lora_weights.safetensors
-  lora_weights: /workspace/fundus_lora_v2/pytorch_lora_weights.safetensors
+  lora_weights: /workspace/fundus_lora_v1/pytorch_lora_weights.safetensors
   lora_scale: 0.7   # 0.5-0.8; lower = less retinal style, higher = more
 
   # LaMa fallback (kept for reference)
@@ -94,3 +93,23 @@ eval:
     ssim_max: 0.85
     lpips_min: 0.15
     lpips_max: 0.35
+
+adversarial:
+  enabled: false              # set true to activate Option C privacy pass
+  epsilon: 0.05               # L-inf perturbation budget (~12/255)
+  step_size: 0.005            # gradient step size per iteration
+  n_steps: 100                # optimisation iterations per image
+  lesion_suppression: true    # suppress perturbation on lesion regions
+  lesion_suppress_weight: 0.1 # residual perturbation allowed on lesions (0=none)
+  loss_weights:
+    retfound: 1.0
+    flair: 1.0
+  encoders:
+    retfound:
+      enabled: true
+      weights: models/RETFound_mae_natureCFP.pth
+      dir: /workspace/RETFound
+    flair:
+      enabled: true           # weights auto-downloaded via HF cache
+      weights: ~                  # not needed — loaded via from_pretrained
+      dir: ~                      # not needed

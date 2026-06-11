@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 from pathlib import Path
 
-from . import preprocessing, segmentation, pathology, masking, inpainting
+from . import preprocessing, segmentation, pathology, masking, inpainting, adversarial
 
 
 def deidentify(image_rgb: np.ndarray,
@@ -97,8 +97,20 @@ def deidentify(image_rgb: np.ndarray,
     deid_image = inpainting.inpaint(
         image_rgb=preprocessed['original_rgb'],
         mask=mask_result['inpaint_mask'],
+        vessel_mask=vessel_mask,
         device=inp_cfg.get('device', 'cuda'),
+        fov=preprocessed.get('fov'),
     )
+
+    # ── 6. Adversarial privacy pass (Option C) ────────────────────────────────
+    adv_cfg = cfg.get('adversarial', {})
+    if adv_cfg.get('enabled', False):
+        deid_image = adversarial.apply_privacy_pass(
+            inpainted_rgb=deid_image,
+            anchor_rgb=preprocessed['original_rgb'],
+            lesion_mask=lesion_result['combined'],
+            device=inp_cfg.get('device', 'cuda'),
+        )
 
     if return_intermediates:
         return {
