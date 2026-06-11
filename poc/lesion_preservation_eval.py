@@ -288,7 +288,7 @@ def print_summary(results):
     print(f"\n  === Optic Disc Readout ===")
     if disc_ssims:
         print(f"  Mean disc SSIM         : {np.mean(disc_ssims):.4f}  (1.0 = structure preserved)")
-        print(f"  Mean disc intensity Δ  : {np.mean(disc_deltas):.4f}  (0.0 = appearance unchanged)")
+        print(f"  Mean disc intensity d  : {np.mean(disc_deltas):.4f}  (0.0 = appearance unchanged)")
         disc_tail = [(r["patient_id"], r["disc_ssim"]) for r in results
                      if r["disc_ssim"] is not None and r["disc_ssim"] < 0.80]
         if disc_tail:
