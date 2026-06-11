@@ -11,6 +11,7 @@ ControlNet conditioning image = elastically deformed vessel mask (from vessel_pa
 All inference params driven from configs/default.yaml under `inpainting:`.
 """
 
+from os import pipe
 import numpy as np
 import cv2
 from PIL import Image
@@ -19,7 +20,7 @@ from PIL import Image
 _sd_pipe = None
 
 
-def load_model(cfg: dict = None, device: str = 'cuda'):
+def load_model(cfg: dict = None, device: str = "cuda"):
     """
     Load SD + ControlNet inpainting pipeline. Call once at startup.
 
@@ -30,55 +31,57 @@ def load_model(cfg: dict = None, device: str = 'cuda'):
     global _sd_pipe
 
     cfg = cfg or {}
-    sd_model         = cfg.get('sd_model',          'runwayml/stable-diffusion-inpainting')
-    controlnet_model = cfg.get('controlnet_model',  'lllyasviel/sd-controlnet-scribble')
+    sd_model = cfg.get("sd_model", "runwayml/stable-diffusion-inpainting")
+    controlnet_model = cfg.get("controlnet_model", "lllyasviel/sd-controlnet-scribble")
 
     import torch
     from diffusers import StableDiffusionControlNetInpaintPipeline, ControlNetModel
 
-    print(f'Loading ControlNet: {controlnet_model} ...')
+    print(f"Loading ControlNet: {controlnet_model} ...")
     controlnet = ControlNetModel.from_pretrained(
         controlnet_model,
-        torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
     )
 
-    print(f'Loading SD inpainting base: {sd_model} ...')
+    print(f"Loading SD inpainting base: {sd_model} ...")
     pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
         sd_model,
         controlnet=controlnet,
-        torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         safety_checker=None,
     ).to(device)
 
     pipe.enable_attention_slicing()
 
     # LoRA fine-tune weights (optional — set lora_weights in config to enable)
-    lora_weights = cfg.get('lora_weights', None)
-    lora_scale   = float(cfg.get('lora_scale', 0.7))
+    lora_weights = cfg.get("lora_weights", None)
+    lora_scale = float(cfg.get("lora_scale", 0.7))
     if lora_weights:
-        print(f'Loading LoRA weights: {lora_weights} (scale={lora_scale}) ...')
-        pipe.load_lora_weights(lora_weights, adapter_name="fundus")
-pipe.set_adapters(["fundus"], adapter_weights=[lora_scale])
-        print('✅ LoRA fused')
+        print(f"Loading LoRA weights: {lora_weights} (scale={lora_scale}) ...")
+        pipe.load_lora_weights(lora_weights)
+        pipe.fuse_lora(lora_scale=lora_scale)
+        print("✅ LoRA fused")
 
     _sd_pipe = {
-        'pipe':   pipe,
-        'device': device,
-        'cfg':    cfg,
+        "pipe": pipe,
+        "device": device,
+        "cfg": cfg,
     }
 
-    print(f'✅ SD + ControlNet loaded (device={device})')
+    print(f"✅ SD + ControlNet loaded (device={device})")
     return _sd_pipe
 
 
-def inpaint(image_rgb: np.ndarray,
-            mask: np.ndarray,
-            vessel_mask: np.ndarray = None,
-            control_image: Image.Image = None,
-            device: str = 'cuda',
-            seed: int = None,
-            controlnet_conditioning_scale: float = None,
-            fov: tuple = None) -> np.ndarray:
+def inpaint(
+    image_rgb: np.ndarray,
+    mask: np.ndarray,
+    vessel_mask: np.ndarray = None,
+    control_image: Image.Image = None,
+    device: str = "cuda",
+    seed: int = None,
+    controlnet_conditioning_scale: float = None,
+    fov: tuple = None,
+) -> np.ndarray:
     """
     Run SD + ControlNet inpainting on a single image.
 
@@ -102,27 +105,29 @@ def inpaint(image_rgb: np.ndarray,
         uint8 (H, W, 3) RGB de-identified image
     """
     if _sd_pipe is None:
-        raise RuntimeError('SD pipeline not loaded. Call inpainting.load_model() first.')
+        raise RuntimeError(
+            "SD pipeline not loaded. Call inpainting.load_model() first."
+        )
 
     import torch
     from .vessel_pattern import build_control_image
 
-    pipe = _sd_pipe['pipe']
-    cfg  = _sd_pipe['cfg']
+    pipe = _sd_pipe["pipe"]
+    cfg = _sd_pipe["cfg"]
 
-    prompt          = cfg.get('prompt', '').strip()
-    negative_prompt = cfg.get('negative_prompt', '').strip()
-    steps           = int(cfg.get('num_inference_steps', 50))
-    guidance_scale  = float(cfg.get('guidance_scale', 7.5))
-    strength        = float(cfg.get('strength', 1.0))
-    cn_scale        = controlnet_conditioning_scale or float(
-        cfg.get('controlnet_conditioning_scale', 0.6)
+    prompt = cfg.get("prompt", "").strip()
+    negative_prompt = cfg.get("negative_prompt", "").strip()
+    steps = int(cfg.get("num_inference_steps", 50))
+    guidance_scale = float(cfg.get("guidance_scale", 7.5))
+    strength = float(cfg.get("strength", 1.0))
+    cn_scale = controlnet_conditioning_scale or float(
+        cfg.get("controlnet_conditioning_scale", 0.6)
     )
-    vp_cfg          = cfg.get('vessel_pattern', {})
+    vp_cfg = cfg.get("vessel_pattern", {})
 
     h, w = image_rgb.shape[:2]
     pil_image = Image.fromarray(image_rgb).resize((512, 512))
-    pil_mask  = Image.fromarray(mask).resize((512, 512), resample=Image.NEAREST)
+    pil_mask = Image.fromarray(mask).resize((512, 512), resample=Image.NEAREST)
 
     if seed is None:
         seed = int(torch.randint(0, 2**31, (1,)).item())
@@ -131,7 +136,7 @@ def inpaint(image_rgb: np.ndarray,
     if control_image is None:
         if vessel_mask is None:
             raise ValueError(
-                'Either vessel_mask or control_image must be provided for ControlNet inpainting.'
+                "Either vessel_mask or control_image must be provided for ControlNet inpainting."
             )
         control_image = build_control_image(
             vessel_mask=vessel_mask,
