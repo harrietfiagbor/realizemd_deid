@@ -189,7 +189,12 @@ def main(args):
         if agg > best_recall:
             best_recall = agg; best_thr = thr
 
-    print(f"\nBest threshold: {best_thr}  recall: {best_recall:.4f}")
+    auto_best_thr = best_thr
+    if args.force_thr is not None:
+        best_thr = args.force_thr
+        print(f"\nForced threshold: {best_thr}  (auto-best was {auto_best_thr}, recall={best_recall:.4f})")
+    else:
+        print(f"\nBest threshold: {best_thr}  recall: {best_recall:.4f}")
 
     # ── Per-image recall at best threshold ────────────────────────────────────
     per_image_recall = {}
@@ -275,6 +280,8 @@ if __name__ == "__main__":
     p.add_argument("--patch",      type=int,   default=768)
     p.add_argument("--stride",     type=int,   default=640)
     p.add_argument("--threshold",  type=float, default=0.05)
+    p.add_argument("--force_thr",  type=float, default=None,
+                   help="Force this threshold for final reporting instead of auto-selecting best")
     p.add_argument("--dilate_px",  type=int,   default=15)
     p.add_argument("--tta",        action="store_true")
     p.add_argument("--drive_dir",  default=None)
