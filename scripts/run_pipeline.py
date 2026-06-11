@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pipeline import preprocessing, segmentation, pathology, masking, inpainting
+from pipeline import preprocessing, segmentation, pathology, masking, inpainting, adversarial
 
 
 SWEEP_SCALES = [0.4, 0.5, 0.6, 0.7]
@@ -59,7 +59,7 @@ def parse_args():
 
 def process_image(img_path, preprocessed, vessel_mask, lesion_result, mask_result,
                   inp_cfg, output_dir, mask_dir, dil, device,
-                  controlnet_conditioning_scale=None, save_masks=False):
+                  controlnet_conditioning_scale=None, save_masks=False, adv_cfg=None):
     """Run inpainting + save for one image. Returns output path or None on failure."""
     try:
         import torch
@@ -74,6 +74,15 @@ def process_image(img_path, preprocessed, vessel_mask, lesion_result, mask_resul
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             fov=preprocessed['fov'],
         )
+
+        # Adversarial privacy pass (Option C) — fires if enabled in config
+        if (adv_cfg or {}).get('enabled', False):
+            deid = adversarial.apply_privacy_pass(
+                inpainted_rgb=deid,
+                anchor_rgb=preprocessed['original_rgb'],
+                lesion_mask=lesion_result['combined'],
+                device=inp_cfg.get('device', device),
+            )
 
         out_path = output_dir / f'{img_path.stem}_deid_dil{dil}.png'
         cv2.imwrite(str(out_path), cv2.cvtColor(deid, cv2.COLOR_RGB2BGR))
@@ -135,6 +144,10 @@ def main():
         device=args.device,
     )
 
+    adv_cfg = cfg.get('adversarial', {})
+    if adv_cfg.get('enabled', False):
+        adversarial.load_privacy_pass(cfg, device=args.device)
+
     reference_rgb = preprocessing.select_reference(image_paths)
 
     seg_cfg  = cfg.get('segmentation', {})
@@ -192,7 +205,7 @@ def main():
                     img_path, preprocessed, vessel_mask, lesion_result, mask_result,
                     inp_cfg, scale_dir, mask_dir, dil, args.device,
                     controlnet_conditioning_scale=scale,
-                    save_masks=args.save_masks,
+                    save_masks=args.save_masks, adv_cfg=cfg.get('adversarial', {}),
                 )
                 if result is None:
                     failed.append(img_path.name)
@@ -220,7 +233,7 @@ def main():
             result = process_image(
                 img_path, preprocessed, vessel_mask, lesion_result, mask_result,
                 inp_cfg, output_dir, mask_dir, dil, args.device,
-                save_masks=args.save_masks,
+                save_masks=args.save_masks, adv_cfg=cfg.get('adversarial', {}),
             )
             if result is None:
                 failed.append(img_path.name)
