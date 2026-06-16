@@ -1,0 +1,72 @@
+# RealizeMD Path B — Phase 0 Config
+# Goal: get Mueller StyleGAN2 running on real fundus, healthy-only.
+# Confirm training loop stable, images fundus-like, FID moving down.
+# RTX 2000 Ada (16GB) — conservative settings.
+
+output_dir: /workspace/outputs/pathb
+experiment_folder: phase0_healthy_baseline
+
+gpus: [0]
+max_epoch: 50          # ~enough to see meaningful FID movement; not the full 200
+
+# Lightning trainer
+val_check_percent: 1.0
+val_check_interval: 5
+monitor_metric: val_overall_loss
+monitor_mode: min
+
+seed: 42
+sanity_steps: 1        # run 1 sanity batch to catch errors fast
+resume:
+
+# Dataset — using FundusFolderDataset wrapper (no metadata CSV needed)
+data:
+  image_root_dir: /workspace/fundus_train/
+  image_size: 128          # start at 128; upgrade to 256 once stable
+  batch_size: 6            # conservative for 16GB VRAM
+  num_workers: 4
+  prefetch_factor: 2
+  input_preprocessing: True
+
+  # Phase 0: no labels. Subspace dims will be [] — pure generation baseline.
+  label_csv:
+  label_columns: []
+  classifier_labels: []
+
+  train_subset: 180        # 90% of 198
+  val_subset: 18
+
+# Loss weights (Mueller defaults)
+lambda_plp: 2
+lambda_enc_fake: 1
+lambda_enc_real: 2
+lambda_subspace_cs: 0.0    # no classifiers in Phase 0
+lambda_distance_correlation: 0.0   # no dCor in Phase 0 — add in Phase 1
+
+# Model
+generator: stylegan2
+latent_dim: 32             # Mueller's baseline; will split into subspaces in Phase 1
+num_mapping_layers: 8
+lr_g: 0.0025
+lr_d: 0.0025
+lazy_gradient_penalty_interval: 8
+lazy_path_penalty_after: 0
+lazy_path_penalty_interval: 2
+
+cycle_consistency: True
+seperate_mapping_networks: False  # Phase 0: no subspaces, single mapping network
+buffer_size: 4             # ring buffer (keep for Phase 1 dCor readiness)
+
+# No subspace classifiers in Phase 0
+classifier:
+  linear: True
+  subspace_dims: []
+  hidden_layers:
+
+# StyleGAN2-ADA augmentation — enable for small dataset (198 images)
+ada_start_p: 0.0
+ada_target: 0.6
+ada_interval: 4
+ada_fixed: False
+
+num_vis_images: 16
