@@ -131,7 +131,7 @@ def _load_flair(weights_path: str, flair_dir: str, device: str):
     try:
         from flair import FLAIRModel
         model = FLAIRModel.from_pretrained('jusiro2/FLAIR')
-        encoder = model.vision_encoder
+        encoder = model.vision_model
         encoder.eval().to(device)
         print(f'  ✅ FLAIR encoder loaded (device={device})')
         return encoder, 'flair_native'
