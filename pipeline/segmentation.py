@@ -11,6 +11,16 @@ import cv2
 _model = None  # module-level singleton — load once, reuse
 
 
+def _feather_fov_edge(img_1ch: np.ndarray, cx: int, cy: int, r: int,
+                      feather_sigma: int = 12) -> np.ndarray:
+    """Gaussian-feather the FOV edge so the model never sees a hard border."""
+    h, w = img_1ch.shape
+    circle = np.zeros((h, w), dtype=np.float32)
+    cv2.circle(circle, (cx, cy), r, 1.0, -1)
+    feathered = cv2.GaussianBlur(circle, (0, 0), feather_sigma)
+    return (img_1ch * np.clip(feathered, 0, 1)).astype(img_1ch.dtype)
+
+
 def load_model(weights_path: str):
     """Load Attention U-Net from .h5 weights. Call once at startup."""
     global _model
@@ -37,6 +47,7 @@ def load_model(weights_path: str):
             '/workspace/arkan_unet',
             '/workspace/realizemd_deid/arkan_unet',
             str(Path(__file__).parent.parent.parent / 'arkan_unet'),
+            r'G:\.shortcut-targets-by-id\1xi33GvmEZlVK_nWUCu2vluhMl1xd-7ig\retinal_vessel_segmentation_project\arkan_unet',
         ]
         for p in candidate_paths:
             path_obj = Path(p).resolve()
@@ -97,9 +108,11 @@ def predict(preprocessed: dict, threshold: float = 0.5) -> np.ndarray:
 
     inp_shape = _model.input_shape
     n_channels = inp_shape[-1]
+    cx, cy, r = preprocessed['fov']
 
     if n_channels == 1:
-        img = preprocessed['green_clahe'].astype(np.float32) / 255.0
+        green = _feather_fov_edge(preprocessed['green_clahe'], cx, cy, r)
+        img = green.astype(np.float32) / 255.0
         img = img[np.newaxis, ..., np.newaxis]   # (1, H, W, 1)
     else:
         img = preprocessed['enhanced_rgb'].astype(np.float32) / 255.0
@@ -108,6 +121,12 @@ def predict(preprocessed: dict, threshold: float = 0.5) -> np.ndarray:
     with tf.device('/cpu:0'):
         pred = _model.predict(img, verbose=0)        # (1, H, W, 1)
     mask = (pred[0, ..., 0] > threshold).astype(np.uint8) * 255
+
+    # Clip to FOV circle — removes background false positives outside the retina
+    h, w = mask.shape
+    fov_circle = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(fov_circle, (cx, cy), r, 255, -1)
+    mask = cv2.bitwise_and(mask, fov_circle)
     return mask
 
 

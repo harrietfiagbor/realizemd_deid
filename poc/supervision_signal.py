@@ -46,6 +46,24 @@ from pipeline.pathology import (
     detect_microaneurysms,
     detect_optic_disc,
 )
+from pipeline.preprocessing import detect_fov, apply_fov_mask
+from pipeline import segmentation as model_a
+
+
+def _vessel_mask_via_model_a(img_rgb: np.ndarray) -> np.ndarray:
+    """
+    Real vessel mask via Model A (arkanivasarkar Attention U-Net), run at its
+    native 512x512 resolution then resized back to img_rgb's shape.
+    Requires model_a.load_model(weights_path) to have been called already.
+    """
+    H, W = img_rgb.shape[:2]
+    img_512 = cv2.resize(img_rgb, (512, 512))
+    cx, cy, r = detect_fov(img_512)
+    img_512_fov = apply_fov_mask(img_512, cx, cy, r)
+    clahe_op = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    green_clahe = clahe_op.apply(img_512_fov[:, :, 1])
+    vessel_512 = model_a.predict({"green_clahe": green_clahe, "fov": (cx, cy, r)})
+    return cv2.resize(vessel_512, (W, H), interpolation=cv2.INTER_NEAREST)
 
 
 def preprocess(img_bgr: np.ndarray) -> np.ndarray:
@@ -79,6 +97,7 @@ def generate(
     he_model=None,
     he_threshold: float = 0.30,
     device: str = "cpu",
+    suppress_vessels: bool = True,
 ) -> dict:
     """
     Generate the supervision signal for one image.
@@ -114,11 +133,27 @@ def generate(
 
     # ── EX ────────────────────────────────────────────────────────────────────
     gt_ex = _load_gt_mask(gt_ex_dir, image_id, "_EX")
+    ex_from_detector = gt_ex is None
     ex_mask = gt_ex if gt_ex is not None else detect_hard_exudates(img_rgb, od)
 
     # ── MA ────────────────────────────────────────────────────────────────────
     gt_ma = _load_gt_mask(gt_ma_dir, image_id, "_MA")
+    ma_from_detector = gt_ma is None
     ma_mask = gt_ma if gt_ma is not None else detect_microaneurysms(img_rgb, od)
+
+    # ── Vessel suppression ──────────────────────────────────────────────────────
+    # The rule-based EX/MA detectors fire on vessel edges/reflections (visible as
+    # green/blue tracing the vasculature). Subtract Model A's real vessel mask so
+    # the GAN isn't taught that lesions live on vessels. Only applied to
+    # detector-derived masks — GT masks are ground truth and left untouched.
+    # Requires model_a.load_model() to have been called; otherwise skipped.
+    if suppress_vessels and (ex_from_detector or ma_from_detector) and model_a._model is not None:
+        vessels = _vessel_mask_via_model_a(img_rgb)
+        not_v = cv2.bitwise_not(vessels)
+        if ex_from_detector:
+            ex_mask = cv2.bitwise_and(ex_mask, not_v)
+        if ma_from_detector:
+            ma_mask = cv2.bitwise_and(ma_mask, not_v)
 
     combined  = cv2.bitwise_or(cv2.bitwise_or(he_mask, ex_mask), ma_mask)
     has_lesion = combined.max() > 0
@@ -143,14 +178,31 @@ def generate_dataset(
     he_model=None,
     he_threshold: float = 0.30,
     device: str = "cpu",
+    mask_size: int = None,
+    min_grade: int = None,
+    limit: int = None,
+    vessel_weights: str = None,
 ):
     """
     Run generate() over a full image directory. Saves per-image mask .npz files.
 
     Output per image: {out_dir}/{stem}_supervision.npz
       keys: he_mask, ex_mask, ma_mask, combined, dr_grade, has_lesion
+
+    mask_size      : if set, masks are resized to (mask_size, mask_size) before
+                     saving (nearest-neighbour, keeps 0/255 binary). Matches the
+                     GAN/loss res.
+    min_grade      : if set, only images with dr_grade >= min_grade are processed
+                     (e.g. 1 to skip healthy grade-0 images). Requires grade_csv.
+    limit          : if set, stop after this many images (for smoke tests).
+    vessel_weights : path to Model A .h5 weights. If set, EX/MA masks have the
+                     real vessel mask subtracted (suppress_vessels). If None,
+                     vessel suppression is skipped entirely.
     """
     import pandas as pd
+
+    if vessel_weights:
+        model_a.load_model(vessel_weights)
 
     grades = {}
     if grade_csv:
@@ -159,7 +211,20 @@ def generate_dataset(
         grades = dict(zip(df["image"].astype(str), df["level"].astype(int)))
 
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    img_paths = sorted(Path(img_dir).glob("*.jpg")) + sorted(Path(img_dir).glob("*.png"))
+    # EyePACS is .jpeg; IDRiD/others are .jpg/.png/.tif — match case-insensitively.
+    exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+    img_paths = sorted(
+        p for p in Path(img_dir).iterdir()
+        if p.suffix.lower() in exts
+    )
+
+    # Optional grade filter (e.g. diseased-only for disease-subspace supervision)
+    if min_grade is not None:
+        img_paths = [p for p in img_paths if grades.get(p.stem, -1) >= min_grade]
+
+    # Optional cap (smoke tests)
+    if limit is not None:
+        img_paths = img_paths[:limit]
 
     for img_path in img_paths:
         stem    = img_path.stem
@@ -179,12 +244,19 @@ def generate_dataset(
             device     = device,
         )
 
+        he_m, ex_m, ma_m = sig["masks"]["HE"], sig["masks"]["EX"], sig["masks"]["MA"]
+        comb = sig["combined"]
+        if mask_size is not None:
+            # nearest-neighbour keeps masks binary (0/255)
+            rs = lambda m: cv2.resize(m, (mask_size, mask_size), interpolation=cv2.INTER_NEAREST)
+            he_m, ex_m, ma_m, comb = rs(he_m), rs(ex_m), rs(ma_m), rs(comb)
+
         np.savez_compressed(
             str(out / f"{stem}_supervision.npz"),
-            he_mask    = sig["masks"]["HE"],
-            ex_mask    = sig["masks"]["EX"],
-            ma_mask    = sig["masks"]["MA"],
-            combined   = sig["combined"],
+            he_mask    = he_m,
+            ex_mask    = ex_m,
+            ma_mask    = ma_m,
+            combined   = comb,
             dr_grade   = np.int8(sig["dr_grade"]),
             has_lesion = np.bool_(sig["has_lesion"]),
         )
@@ -206,6 +278,10 @@ if __name__ == "__main__":
     p.add_argument("--ckpt",       default=None, help="HE detector .pth (optional)")
     p.add_argument("--encoder",    default="efficientnet-b2")
     p.add_argument("--threshold",  type=float, default=0.30)
+    p.add_argument("--mask_size",  type=int, default=None, help="resize masks to NxN before saving")
+    p.add_argument("--min_grade",  type=int, default=None, help="only process dr_grade >= this")
+    p.add_argument("--limit",      type=int, default=None, help="cap number of images (smoke test)")
+    p.add_argument("--vessel_weights", default=None, help="Model A .h5 weights (enables vessel suppression)")
     args = p.parse_args()
 
     model = None
@@ -223,4 +299,6 @@ if __name__ == "__main__":
         args.img_dir, args.out_dir, args.grade_csv,
         args.gt_he_dir, args.gt_ex_dir, args.gt_ma_dir,
         model, args.threshold, device,
+        mask_size=args.mask_size, min_grade=args.min_grade, limit=args.limit,
+        vessel_weights=args.vessel_weights,
     )
