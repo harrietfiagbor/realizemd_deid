@@ -160,12 +160,10 @@ def _sample_patches_from_coords(image, mask, ys, xs, patch, half, n):
 
 
 def extract_patches(image: np.ndarray, mask: np.ndarray,
-                    patch: int = 512, n_pos: int = 8, n_neg: int = 4,
-                    vessel_mask: np.ndarray = None, n_vessel: int = 4):
+                    patch: int = 512, n_pos: int = 8, n_neg: int = 4):
     """
-    Per-blob stratified sampling. MA blobs are tiny so every GT blob gets
-    at least one centred patch. Vessel-region negatives added when vessel
-    mask is available — vessels are the primary MA confuser.
+    Per-blob stratified sampling. Every GT MA blob gets at least one centred
+    patch. Random background negatives fill the rest.
     """
     H, W    = mask.shape
     half    = patch // 2
@@ -175,8 +173,6 @@ def extract_patches(image: np.ndarray, mask: np.ndarray,
     regions = sk_measure.regionprops(labeled)
 
     if regions:
-        # MA blobs are all tiny (<500px at full res) so each gets 1 patch;
-        # scale down if count exceeds n_pos budget
         n_per_blob = max(1, n_pos // max(len(regions), 1))
         for reg in regions:
             blob_ys, blob_xs = np.where(labeled == reg.label)
@@ -189,15 +185,6 @@ def extract_patches(image: np.ndarray, mask: np.ndarray,
             patches += _sample_patches_from_coords(
                 image, mask, ma_ys, ma_xs, patch, half, remaining)
 
-    # Vessel-region negatives: patches centred on vessel pixels teach the
-    # model to distinguish vessels from MA
-    if vessel_mask is not None and n_vessel > 0:
-        vys, vxs = np.where(vessel_mask > 0)
-        if len(vys) > 0:
-            patches += _sample_patches_from_coords(
-                image, mask, vys, vxs, patch, half, n_vessel)
-
-    # Random background negatives
     for _ in range(n_neg):
         y0 = random.randint(0, max(0, H - patch))
         x0 = random.randint(0, max(0, W - patch))
@@ -236,9 +223,8 @@ class MADataset(Dataset):
     def _build_patches(self):
         self.patches = []
         for item in self.samples:
-            img_path    = item[0]
-            mask_path   = item[1]
-            vessel_path = item[2] if len(item) > 2 else None
+            img_path  = item[0]
+            mask_path = item[1]
             img_bgr = cv2.imread(str(img_path))
             if img_bgr is None:
                 continue
@@ -247,10 +233,8 @@ class MADataset(Dataset):
             if mask is None:
                 mask = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
             mask = (mask > 0).astype(np.uint8) * 255
-            vm = cv2.imread(str(vessel_path), cv2.IMREAD_GRAYSCALE) if vessel_path else None
             for img_p, mask_p in extract_patches(
-                    img_rgb, mask, self.patch_size, self.n_pos, self.n_neg,
-                    vessel_mask=vm, n_vessel=4):
+                    img_rgb, mask, self.patch_size, self.n_pos, self.n_neg):
                 if img_p.shape[0] == self.patch_size and img_p.shape[1] == self.patch_size:
                     self.patches.append((img_p, mask_p))
 
@@ -273,10 +257,9 @@ class MADataset(Dataset):
 
 # ── Data loading helpers ──────────────────────────────────────────────────────
 
-def load_idrid_samples(idrid_dir: Path, split: str = 'train',
-                       vessel_mask_dir: Path = None):
+def load_idrid_samples(idrid_dir: Path, split: str = 'train'):
     """
-    Returns list of (img_path, ma_mask_path, vessel_path_or_None).
+    Returns list of (img_path, ma_mask_path).
     split: 'train' (54 images) or 'test' (27 images).
     """
     folder  = 'a. Training Set' if split == 'train' else 'b. Testing Set'
@@ -288,11 +271,7 @@ def load_idrid_samples(idrid_dir: Path, split: str = 'train',
         ma_glob = list(ma_dir.glob(f'{stem}_MA.*'))
         if not ma_glob:
             continue
-        vm = None
-        if vessel_mask_dir is not None:
-            vm_path = Path(vessel_mask_dir) / f'{stem}_vessel.png'
-            vm = vm_path if vm_path.exists() else None
-        samples.append((img_path, ma_glob[0], vm))
+        samples.append((img_path, ma_glob[0]))
     return samples
 
 
@@ -387,8 +366,7 @@ def train(args):
     print(f"Device: {device}")
 
     idrid_dir  = Path(args.idrid_dir)
-    vessel_dir = Path(args.vessel_mask_dir) if args.vessel_mask_dir else None
-    train_samp = load_idrid_samples(idrid_dir, split='train', vessel_mask_dir=vessel_dir)
+    train_samp = load_idrid_samples(idrid_dir, split='train')
     val_samp   = load_idrid_samples(idrid_dir, split='test')
 
     if args.ddr_dir:
@@ -513,8 +491,6 @@ def parse_args():
                    help='Path to IDRiD A. Segmentation/A. Segmentation dir')
     p.add_argument('--ddr_dir',        default=None,
                    help='Path to DDR dataset root (optional)')
-    p.add_argument('--vessel_mask_dir', default=None,
-                   help='Dir of vessel masks (IDRiD_XX_vessel.png) — used for hard-negative sampling')
     p.add_argument('--out_dir',        default='models/ma_detector')
     p.add_argument('--encoder',        default='efficientnet-b2',
                    help='Encoder backbone. b2 is lighter and sufficient for MA dot detection.')
