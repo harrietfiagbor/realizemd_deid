@@ -38,10 +38,10 @@ import segmentation_models_pytorch as smp
 from skimage import measure as sk_measure
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 # ── Loss ─────────────────────────────────────────────────────────────────────
@@ -419,8 +419,9 @@ def validate(model: nn.Module, val_samples: list, args, device: str):
 # ── Training loop ─────────────────────────────────────────────────────────────
 
 def train(args):
+    set_seed(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Device: {device}")
+    print(f"Device: {device}  Seed: {args.seed}")
 
     # ── Data ──────────────────────────────────────────────────────────────────
     idrid_dir  = Path(args.idrid_dir)
@@ -518,7 +519,7 @@ def train(args):
                 torch.save({'epoch': epoch, 'recall': recall,
                             'preservation': mean_pres, 'combined': combined,
                             'state_dict': model.state_dict(),
-                            'threshold': args.threshold}, str(ckpt))
+                            'threshold': args.threshold, 'seed': args.seed}, str(ckpt))
                 print(f"  ✓ New best saved: recall={recall:.4f}  preservation={mean_pres:.4f}  combined={combined:.4f}")
                 if args.drive_dir:
                     import subprocess as _sp
@@ -562,6 +563,8 @@ def parse_args():
                    help='Dir of precomputed vessel masks (IDRiD_XX_vessel.png). '
                         'Used to oversample HE-on-vessel patches.')
     p.add_argument('--out_dir',       default='models/he_detector')
+    p.add_argument('--seed',          type=int, default=42,
+                   help='Random seed for reproducibility / multi-seed stability checks.')
     p.add_argument('--encoder',       default='efficientnet-b4')
     p.add_argument('--epochs',        type=int,   default=80)
     p.add_argument('--batch_size',    type=int,   default=4)
