@@ -20,6 +20,8 @@ from pathlib import Path
 p = argparse.ArgumentParser()
 p.add_argument("--log", default="/workspace/train_ex.log")
 p.add_argument("--out", default=None)
+p.add_argument("--drive_dir", default=None,
+               help="If set, rclone-copy the output PNG here after saving.")
 args = p.parse_args()
 
 LOG = Path(args.log)
@@ -91,3 +93,11 @@ plt.tight_layout()
 plt.savefig(str(OUT), dpi=110, bbox_inches="tight")
 print(f"Saved -> {OUT}")
 print(f"Best validation epoch: {val_epochs[best_idx] if best_idx is not None else 'N/A'}")
+
+if args.drive_dir:
+    import subprocess as _sp
+    r = _sp.run(["rclone", "copy", str(OUT), args.drive_dir], capture_output=True, text=True)
+    if r.returncode == 0:
+        print(f"Backed up to Drive: {args.drive_dir}")
+    else:
+        print(f"Drive backup failed: {r.stderr.strip()}")

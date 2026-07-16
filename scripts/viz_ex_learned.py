@@ -1,17 +1,18 @@
 """
 viz_ex_learned.py
 
-Visualizes the learned EX detector (run1, epoch 5) vs rule-based EX (Fix 1+2)
+Visualizes a learned EX detector checkpoint vs rule-based EX (Fix 1+2)
 on IDRiD test images.
 
 5 panels per image:
-  GT | Rule-based baseline (Fix 1+2) | Learned (epoch 5) | FP comparison | Prob heatmap
+  GT | Rule-based baseline (Fix 1+2) | Learned | FP comparison | Prob heatmap
 
-Output: EX_learned_vs_rulebased_viz.png
+Output: <ckpt-parent-dirname>_learned_vs_rulebased_viz.png (or --out to override)
 
 Run (on pod, GPU):
-    python viz_ex_learned.py
+    python viz_ex_learned.py --ckpt /workspace/models/ex_detector_seed123/ex_detector_best.pth
 """
+import argparse
 import sys
 import cv2
 import numpy as np
@@ -24,11 +25,18 @@ import matplotlib.patches as mpatches
 from pathlib import Path
 from skimage import measure as sk_measure
 
+p = argparse.ArgumentParser()
+p.add_argument("--ckpt", default="/workspace/models/ex_detector/ex_detector_best.pth")
+p.add_argument("--out", default=None)
+p.add_argument("--drive_dir", default=None,
+               help="If set, rclone-copy the output PNG here after saving.")
+args = p.parse_args()
+
 BASE    = Path("/workspace/data/idrid/A. Segmentation")
 IMAGES  = BASE / "1. Original Images" / "b. Testing Set"
 GT_ROOT = BASE / "2. All Segmentation Groundtruths" / "b. Testing Set" / "3. Hard Exudates"
-CKPT    = Path("/workspace/models/ex_detector/ex_detector_best.pth")
-OUT     = Path("/workspace/EX_learned_vs_rulebased_viz.png")
+CKPT    = Path(args.ckpt)
+OUT     = Path(args.out) if args.out else Path(f"/workspace/{CKPT.parent.name}_learned_vs_rulebased_viz.png")
 
 sys.path.insert(0, "/workspace/realizemd_deid")
 from pipeline.pathology import detect_optic_disc
@@ -210,3 +218,11 @@ plt.tight_layout()
 plt.savefig(str(OUT), dpi=85, bbox_inches='tight')
 print(f"Saved -> {OUT}")
 plt.close()
+
+if args.drive_dir:
+    import subprocess as _sp
+    r = _sp.run(["rclone", "copy", str(OUT), args.drive_dir], capture_output=True, text=True)
+    if r.returncode == 0:
+        print(f"Backed up to Drive: {args.drive_dir}")
+    else:
+        print(f"Drive backup failed: {r.stderr.strip()}")
