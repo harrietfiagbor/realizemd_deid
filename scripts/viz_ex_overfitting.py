@@ -1,23 +1,29 @@
 """
 viz_ex_overfitting.py
 
-Parses train_ex.log and plots training loss vs validation metrics per epoch,
-to visually show the overfitting: training loss keeps dropping while
-validation combined score plateaus/declines after epoch 5.
+Parses an EX training log and plots training loss vs validation metrics per
+epoch, to visually show the overfitting: training loss keeps dropping while
+validation combined score plateaus/declines after its peak.
 
-Output: EX_overfitting_viz.png
+Output: <log-stem>_overfitting_viz.png (or --out to override)
 
 Run (on pod):
-    python viz_ex_overfitting.py
+    python viz_ex_overfitting.py --log /workspace/train_ex_seed123.log
 """
+import argparse
 import re
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-LOG = Path("/workspace/train_ex.log")
-OUT = Path("/workspace/EX_overfitting_viz.png")
+p = argparse.ArgumentParser()
+p.add_argument("--log", default="/workspace/train_ex.log")
+p.add_argument("--out", default=None)
+args = p.parse_args()
+
+LOG = Path(args.log)
+OUT = Path(args.out) if args.out else LOG.with_name(LOG.stem + "_overfitting_viz.png")
 
 # Epoch NNN | loss=X.XXXX [| recall=X.XXXX (h/g) | preservation=X.XXXX | combined=X.XXXX]
 LOSS_RE = re.compile(r"Epoch (\d+) \| loss=([\d.]+)")
