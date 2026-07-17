@@ -13,6 +13,7 @@ Output: eval_ex_learned_256px_results.txt
 Run (on pod, GPU):
     python eval_ex_learned_256px.py
 """
+import argparse
 import cv2
 import numpy as np
 import torch
@@ -21,11 +22,17 @@ import segmentation_models_pytorch as smp
 from pathlib import Path
 from skimage import measure as sk_measure
 
+p = argparse.ArgumentParser()
+p.add_argument("--ckpt", default="/workspace/models/ex_detector/ex_detector_best.pth")
+p.add_argument("--out", default=None)
+p.add_argument("--drive_dir", default=None)
+args = p.parse_args()
+
 BASE    = Path("/workspace/data/idrid/A. Segmentation")
 IMAGES  = BASE / "1. Original Images"
 GT_ROOT = BASE / "2. All Segmentation Groundtruths"
-CKPT    = Path("/workspace/models/ex_detector/ex_detector_best.pth")
-LOG     = Path("/workspace/eval_ex_learned_256px_results.txt")
+CKPT    = Path(args.ckpt)
+LOG     = Path(args.out) if args.out else Path(f"/workspace/eval_ex_learned_256px_{CKPT.parent.name}_results.txt")
 
 TARGET_HW = (256, 256)
 MODES     = ["maxpool", "maxpool+ero1", "maxpool+ero2", "maxpool+ero3", "area", "nearest"]
@@ -194,3 +201,8 @@ if __name__ == "__main__":
 
     log("\nDone.")
     _log.close()
+
+    if args.drive_dir:
+        import subprocess as _sp
+        r = _sp.run(["rclone", "copy", str(LOG), args.drive_dir], capture_output=True, text=True)
+        print("Drive backup:", "OK" if r.returncode == 0 else r.stderr.strip())
