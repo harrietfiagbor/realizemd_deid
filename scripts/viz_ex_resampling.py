@@ -8,11 +8,12 @@ unlike the rule-based EX detector's sub-pixel collapse at 256px.
 6 panels per image:
   Full-res GT | Full-res prediction | 256px GT | 256px prediction | 512px GT | 512px prediction
 
-Output: EX_resampling_viz.png
+Output: <ckpt-parent-dirname>_resampling_viz.png (or --out to override)
 
 Run (on pod, GPU):
-    python viz_ex_resampling.py
+    python viz_ex_resampling.py --ckpt /workspace/models/ex_detector_seed7/ex_detector_best.pth
 """
+import argparse
 import cv2
 import numpy as np
 import torch
@@ -25,11 +26,17 @@ import matplotlib.patches as mpatches
 from pathlib import Path
 from skimage import measure as sk_measure
 
+p = argparse.ArgumentParser()
+p.add_argument("--ckpt", default="/workspace/models/ex_detector/ex_detector_best.pth")
+p.add_argument("--out", default=None)
+p.add_argument("--drive_dir", default=None)
+args = p.parse_args()
+
 BASE    = Path("/workspace/data/idrid/A. Segmentation")
 IMAGES  = BASE / "1. Original Images" / "b. Testing Set"
 GT_ROOT = BASE / "2. All Segmentation Groundtruths" / "b. Testing Set" / "3. Hard Exudates"
-CKPT    = Path("/workspace/models/ex_detector/ex_detector_best.pth")
-OUT     = Path("/workspace/EX_resampling_viz.png")
+CKPT    = Path(args.ckpt)
+OUT     = Path(args.out) if args.out else Path(f"/workspace/{CKPT.parent.name}_resampling_viz.png")
 
 STEMS     = ["IDRiD_55", "IDRiD_59", "IDRiD_64"]
 PATCH     = 512
@@ -198,3 +205,8 @@ plt.tight_layout()
 plt.savefig(str(OUT), dpi=85, bbox_inches='tight')
 print(f"Saved -> {OUT}")
 plt.close()
+
+if args.drive_dir:
+    import subprocess as _sp
+    r = _sp.run(["rclone", "copy", str(OUT), args.drive_dir], capture_output=True, text=True)
+    print("Drive backup:", "OK" if r.returncode == 0 else r.stderr.strip())
