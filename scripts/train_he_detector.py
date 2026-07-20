@@ -6,7 +6,9 @@ Trains a high-recall binary haemorrhage segmenter.
 Target: HE recall@IoU=0.3 >= 0.70, HE pixel preservation >= 0.98.
 
 Loss: Focal Tversky (alpha=0.7, beta=0.3, gamma=1.33) — FN penalised harder than FP.
-Arch: EfficientNet-B4 U-Net (segmentation_models_pytorch).
+Arch: EfficientNet-B2 U-Net (segmentation_models_pytorch). B4 was tried in Run 1 and
+      underperformed B2 badly (recall 0.325@epoch35 vs 0.388@epoch5) -- see decision.md
+      "HE Encoder History" for the full run-by-run record. Every real run since has used B2.
 Data: IDRiD-train + DDR (HE only). IDRiD-test held out for final eval.
 
 Usage (RunPod or local GPU):
@@ -38,10 +40,10 @@ import segmentation_models_pytorch as smp
 from skimage import measure as sk_measure
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 # ── Loss ─────────────────────────────────────────────────────────────────────
@@ -393,8 +395,9 @@ def validate(model: nn.Module, val_samples: list, args, device: str):
 # ── Training loop ─────────────────────────────────────────────────────────────
 
 def train(args):
+    set_seed(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Device: {device}")
+    print(f"Device: {device}  Seed: {args.seed}")
 
     # ── Data ──────────────────────────────────────────────────────────────────
     idrid_dir  = Path(args.idrid_dir)
@@ -455,6 +458,8 @@ def train(args):
     print(f"\nStarting training — {args.epochs} epochs, patience={patience}")
     print(f"Target: recall@IoU=0.3 >= {args.target_recall}\n")
 
+    epoch = start_epoch - 1  # so the final-checkpoint save below is well-defined
+    #                          even if resume lands exactly at args.epochs
     for epoch in range(start_epoch, args.epochs + 1):
         # Resample patches each epoch for diversity
         train_ds.resample()
@@ -491,7 +496,7 @@ def train(args):
                 torch.save({'epoch': epoch, 'recall': recall,
                             'preservation': mean_pres, 'combined': combined,
                             'state_dict': model.state_dict(),
-                            'threshold': args.threshold}, str(ckpt))
+                            'threshold': args.threshold, 'seed': args.seed}, str(ckpt))
                 print(f"  ✓ New best saved: recall={recall:.4f}  preservation={mean_pres:.4f}  combined={combined:.4f}")
                 if args.drive_dir:
                     import subprocess as _sp
@@ -531,11 +536,17 @@ def parse_args():
                    help='Path to IDRiD A. Segmentation/A. Segmentation dir')
     p.add_argument('--ddr_dir',        default=None,
                    help='Path to DDR dataset root (optional)')
+    p.add_argument('--seed',          type=int, default=42,
+                   help='Random seed for reproducibility / multi-seed stability checks.')
     p.add_argument('--vessel_mask_dir', default=None,
                    help='Dir of precomputed vessel masks (IDRiD_XX_vessel.png). '
                         'Used to oversample HE-on-vessel patches.')
     p.add_argument('--out_dir',       default='models/he_detector')
-    p.add_argument('--encoder',       default='efficientnet-b4')
+    p.add_argument('--encoder',       default='efficientnet-b2',
+                   help='b4 was tried in Run 1 and underperformed b2 badly (see decision.md '
+                        '"HE Encoder History"); every real run since (2-6) used b2. Default '
+                        'changed from b4 to b2 here so omitting --encoder can no longer '
+                        'silently train the wrong architecture.')
     p.add_argument('--epochs',        type=int,   default=80)
     p.add_argument('--batch_size',    type=int,   default=4)
     p.add_argument('--patch_size',    type=int,   default=768)
