@@ -96,7 +96,7 @@ def main(args):
         for line in f:
             parts = line.strip().split(",")
             rows.append(parts)
-    rows = rows[: args.top_n]
+    rows = rows[args.offset: args.offset + args.top_n]
 
     n_parts = (len(rows) + ROWS_PER_PLOT - 1) // ROWS_PER_PLOT
     for part in range(n_parts):
@@ -131,7 +131,7 @@ def main(args):
                 ax.set_title(title, fontsize=9)
 
         plt.tight_layout()
-        out_png = out_dir / f"triptych_candidates_viz_part{part + 1}.png"
+        out_png = out_dir / f"triptych_candidates_viz_offset{args.offset}_part{part + 1}.png"
         plt.savefig(str(out_png), dpi=80, bbox_inches="tight")
         print(f"Saved -> {out_png}")
         plt.close()
@@ -145,4 +145,6 @@ if __name__ == "__main__":
     p.add_argument("--he_ckpt", required=True)
     p.add_argument("--out_dir", default="triptych")
     p.add_argument("--top_n", type=int, default=20)
+    p.add_argument("--offset", type=int, default=0,
+                    help="Skip the first N ranked candidates (e.g. 20 to review ranks 21-40)")
     main(p.parse_args())
