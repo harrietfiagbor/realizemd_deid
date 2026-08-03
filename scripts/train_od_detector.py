@@ -220,8 +220,12 @@ def load_refuge_od_samples(refuge_dir: Path, split: str = 'train'):
                 if mask_path.exists():
                     samples.append((img_path, mask_path, 'refuge'))
     elif split == 'validation':
-        img_dir  = refuge_dir / 'REFUGE-Validation400'
-        mask_dir = refuge_dir / 'REFUGE-Validation400-GT' / 'Disc_Cup_Masks'
+        # Kaggle repackaging nests the source folder name one level deeper
+        # (REFUGE-Validation400/REFUGE-Validation400/*.jpg), same quirk found
+        # in the G1020 Drive upload -- verified against the actual downloaded
+        # archive before fixing, not guessed.
+        img_dir  = refuge_dir / 'REFUGE-Validation400' / 'REFUGE-Validation400'
+        mask_dir = refuge_dir / 'REFUGE-Validation400-GT' / 'REFUGE-Validation400-GT' / 'Disc_Cup_Masks'
         if img_dir.exists() and mask_dir.exists():
             for img_path in sorted(img_dir.glob('*.jpg')):
                 mask_path = mask_dir / (img_path.stem + '.bmp')
