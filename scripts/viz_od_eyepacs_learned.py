@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 RESOLUTIONS = [512, 256]
+ROWS_PER_PLOT = 10
 
 
 def clahe_rgb(img_rgb):
@@ -68,58 +69,61 @@ def main(args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     n_cols = 1 + len(RESOLUTIONS)
-    n = len(stems)
-    fig, axes = plt.subplots(n, n_cols, figsize=(6 * n_cols, 5 * n))
-    fig.suptitle("Learned OD Detector on EyePACS (same 30 images as the heuristic check, "
-                 "no ground truth -- visual review only)\n"
-                 "Original | Overlay @512px | Overlay @256px  --  cyan = predicted disc region",
-                 fontsize=12, fontweight="bold", y=1.005)
-
     log_lines = ["filename,dr_grade,verdict_512,verdict_256,notes"]
 
-    for row, stem in enumerate(stems):
-        grade = grades[stem]
-        img_path = sample_dir / f"{stem}.jpeg"
-        img_bgr = cv2.imread(str(img_path))
-        if img_bgr is None:
-            print(f"  WARNING: could not read {img_path}")
-            continue
-        img_rgb_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    n_parts = (len(stems) + ROWS_PER_PLOT - 1) // ROWS_PER_PLOT
+    for part in range(n_parts):
+        chunk = stems[part * ROWS_PER_PLOT: (part + 1) * ROWS_PER_PLOT]
+        n = len(chunk)
+        fig, axes = plt.subplots(n, n_cols, figsize=(6 * n_cols, 5 * n))
+        fig.suptitle(f"Learned OD Detector on EyePACS (same 30 images as the heuristic check, "
+                     f"no ground truth -- visual review only) -- part {part + 1}/{n_parts}\n"
+                     "Original | Overlay @512px | Overlay @256px  --  cyan = predicted disc region",
+                     fontsize=12, fontweight="bold", y=1.01)
 
-        panels, coverages = [], []
-        for res in RESOLUTIONS:
-            img_res = cv2.resize(img_rgb_full, (res, res))
-            img_clahe = clahe_rgb(img_res)
-            img_model_in = cv2.resize(img_clahe, (img_size, img_size)) if res != img_size else img_clahe
+        for row, stem in enumerate(chunk):
+            grade = grades[stem]
+            img_path = sample_dir / f"{stem}.jpeg"
+            img_bgr = cv2.imread(str(img_path))
+            if img_bgr is None:
+                print(f"  WARNING: could not read {img_path}")
+                continue
+            img_rgb_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-            with torch.no_grad():
-                t = torch.from_numpy(img_model_in.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
-                prob = torch.sigmoid(model(t.to(device)))[0, 0].cpu().numpy()
-            pred_bin_model = (prob > 0.5).astype(np.uint8)
-            pred_bin = cv2.resize(pred_bin_model, (res, res), interpolation=cv2.INTER_NEAREST) if res != img_size else pred_bin_model
+            panels, coverages = [], []
+            for res in RESOLUTIONS:
+                img_res = cv2.resize(img_rgb_full, (res, res))
+                img_clahe = clahe_rgb(img_res)
+                img_model_in = cv2.resize(img_clahe, (img_size, img_size)) if res != img_size else img_clahe
 
-            coverage = 100.0 * pred_bin.sum() / (res * res)
-            coverages.append(coverage)
-            panels.append(overlay(img_res, pred_bin, [0, 220, 220]))
+                with torch.no_grad():
+                    t = torch.from_numpy(img_model_in.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
+                    prob = torch.sigmoid(model(t.to(device)))[0, 0].cpu().numpy()
+                pred_bin_model = (prob > 0.5).astype(np.uint8)
+                pred_bin = cv2.resize(pred_bin_model, (res, res), interpolation=cv2.INTER_NEAREST) if res != img_size else pred_bin_model
 
-        orig_disp = cv2.resize(img_rgb_full, (400, 400))
-        row_panels = [(orig_disp, f"{stem}\n(grade {grade})")] + [
-            (panels[i], f"@{RESOLUTIONS[i]}px  coverage={coverages[i]:.1f}%")
-            for i in range(len(RESOLUTIONS))
-        ]
-        for col, (panel, title) in enumerate(row_panels):
-            ax = axes[row, col] if n > 1 else axes[col]
-            ax.imshow(panel)
-            ax.axis("off")
-            ax.set_title(title, fontsize=9)
+                coverage = 100.0 * pred_bin.sum() / (res * res)
+                coverages.append(coverage)
+                panels.append(overlay(img_res, pred_bin, [0, 220, 220]))
 
-        log_lines.append(f"{stem},{grade},,,")
+            orig_disp = cv2.resize(img_rgb_full, (400, 400))
+            row_panels = [(orig_disp, f"{stem}\n(grade {grade})")] + [
+                (panels[i], f"@{RESOLUTIONS[i]}px  coverage={coverages[i]:.1f}%")
+                for i in range(len(RESOLUTIONS))
+            ]
+            for col, (panel, title) in enumerate(row_panels):
+                ax = axes[row, col] if n > 1 else axes[col]
+                ax.imshow(panel)
+                ax.axis("off")
+                ax.set_title(title, fontsize=9)
 
-    plt.tight_layout()
-    out_png = out_dir / "OD_learned_eyepacs_viz.png"
-    plt.savefig(str(out_png), dpi=70, bbox_inches="tight")
-    print(f"Saved -> {out_png}")
-    plt.close()
+            log_lines.append(f"{stem},{grade},,,")
+
+        plt.tight_layout()
+        out_png = out_dir / f"OD_learned_eyepacs_viz_part{part + 1}.png"
+        plt.savefig(str(out_png), dpi=80, bbox_inches="tight")
+        print(f"Saved -> {out_png}")
+        plt.close()
 
     out_log = out_dir / "OD_learned_eyepacs_viz_log.txt"
     with open(out_log, "w") as f:
