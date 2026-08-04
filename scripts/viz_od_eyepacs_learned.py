@@ -27,9 +27,30 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
+from skimage import measure as sk_measure
 
 RESOLUTIONS = [512, 256]
 ROWS_PER_PLOT = 10
+
+
+def blob_metrics(pred_bin):
+    """Objective, auditable signals that don't require ground truth:
+    blob count, largest-blob coverage/centroid/border-distance. A disc is
+    never at the frame edge, so border-distance is a real tell for the
+    edge/glare-crescent wrong-blob failure mode specifically."""
+    H, W = pred_bin.shape
+    labeled = sk_measure.label(pred_bin)
+    regions = sk_measure.regionprops(labeled)
+    n_blobs = len(regions)
+    if n_blobs == 0:
+        return n_blobs, 0.0, None, None, None
+    largest = max(regions, key=lambda r: r.area)
+    cy, cx = largest.centroid
+    cy_norm, cx_norm = cy / H, cx / W
+    r0, c0, r1, c1 = largest.bbox
+    border_dist_px = min(r0, c0, H - r1, W - c1)
+    border_dist_frac = border_dist_px / min(H, W)
+    return n_blobs, 100.0 * largest.area / (H * W), (cy_norm, cx_norm), border_dist_frac, int(largest.area)
 
 
 def clahe_rgb(img_rgb):
@@ -70,6 +91,8 @@ def main(args):
 
     n_cols = 1 + len(RESOLUTIONS)
     log_lines = ["filename,dr_grade,verdict_512,verdict_256,notes"]
+    data_lines = ["filename,dr_grade,resolution,coverage_pct,n_blobs,"
+                  "largest_blob_area_px,centroid_y_norm,centroid_x_norm,border_dist_frac"]
 
     n_parts = (len(stems) + ROWS_PER_PLOT - 1) // ROWS_PER_PLOT
     for part in range(n_parts):
@@ -102,9 +125,15 @@ def main(args):
                 pred_bin_model = (prob > 0.5).astype(np.uint8)
                 pred_bin = cv2.resize(pred_bin_model, (res, res), interpolation=cv2.INTER_NEAREST) if res != img_size else pred_bin_model
 
-                coverage = 100.0 * pred_bin.sum() / (res * res)
+                n_blobs, coverage, centroid, border_dist, largest_area = blob_metrics(pred_bin > 0)
                 coverages.append(coverage)
                 panels.append(overlay(img_res, pred_bin, [0, 220, 220]))
+
+                cy_s = f"{centroid[0]:.3f}" if centroid else ""
+                cx_s = f"{centroid[1]:.3f}" if centroid else ""
+                bd_s = f"{border_dist:.3f}" if border_dist is not None else ""
+                data_lines.append(f"{stem},{grade},{res},{coverage:.3f},{n_blobs},"
+                                   f"{largest_area or 0},{cy_s},{cx_s},{bd_s}")
 
             orig_disp = cv2.resize(img_rgb_full, (400, 400))
             row_panels = [(orig_disp, f"{stem}\n(grade {grade})")] + [
@@ -129,6 +158,12 @@ def main(args):
     with open(out_log, "w") as f:
         f.write("\n".join(log_lines) + "\n")
     print(f"Saved -> {out_log} (fill in verdict_512/verdict_256: correct / oversized / wrong-blob / other)")
+
+    out_data = out_dir / "OD_learned_eyepacs_viz_data.csv"
+    with open(out_data, "w") as f:
+        f.write("\n".join(data_lines) + "\n")
+    print(f"Saved -> {out_data} (objective per-image metrics: coverage, blob count, "
+          f"centroid position, border distance -- backs the visual verdicts with numbers)")
 
 
 if __name__ == "__main__":
