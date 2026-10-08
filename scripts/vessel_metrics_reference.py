@@ -103,10 +103,29 @@ def vessel_mask(img_rgb, threshold=0.5):
 
 
 def cl_dice(a, b):
-    """Centerline Dice. a, b: boolean vessel masks, same shape."""
+    """Exact (pixel-coincident) centerline Dice. a, b: boolean vessel masks."""
     skel_a, skel_b = skeletonize(a), skeletonize(b)
     t_prec = (skel_b & a).sum() / max(skel_b.sum(), 1)
     t_sens = (skel_a & b).sum() / max(skel_a.sum(), 1)
+    cldice = 2 * t_prec * t_sens / max(t_prec + t_sens, 1e-9)
+    return cldice, t_prec, t_sens
+
+
+def cl_dice_tol(a, b, tol):
+    """Tolerance-based centerline Dice (centerline-within-tol-px).
+
+    CORRECT formulation: skeletonize BOTH masks at native resolution, then check
+    each skeleton's containment within `tol` px of the OTHER mask (dilate the mask
+    being checked against -- NOT dilate-then-reskeletonize, which corrupts the
+    precision side and can make the "tolerant" number LOWER than exact). By
+    construction cl_dice_tol >= cl_dice for any tol >= 0.
+    """
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * tol + 1, 2 * tol + 1))
+    a_dil = cv2.dilate(a.astype(np.uint8), k) > 0
+    b_dil = cv2.dilate(b.astype(np.uint8), k) > 0
+    skel_a, skel_b = skeletonize(a), skeletonize(b)
+    t_prec = (skel_b & a_dil).sum() / max(skel_b.sum(), 1)   # b-centerline within tol of a
+    t_sens = (skel_a & b_dil).sum() / max(skel_a.sum(), 1)   # a-centerline within tol of b
     cldice = 2 * t_prec * t_sens / max(t_prec + t_sens, 1e-9)
     return cldice, t_prec, t_sens
 
@@ -179,6 +198,8 @@ def run_on_folder(src_dir, weights_path, names=None, load_vae=True):
         row = dict(
             name=name, kind="healthy" if name in HEALTHY else "DR",
             clDice=round(cldice, 3), precision=round(prec, 3), sensitivity=round(sens, 3),
+            clDice_2px=round(cl_dice_tol(v_orig, v_recon, 2)[0], 3),
+            clDice_3px=round(cl_dice_tol(v_orig, v_recon, 3)[0], 3),
             dilated_IoU_2px=round(dilated_iou(v_orig, v_recon, 2), 3),
             dilated_IoU_3px=round(dilated_iou(v_orig, v_recon, 3), 3),
             dilated_IoU_5px=round(dilated_iou(v_orig, v_recon, 5), 3),
@@ -188,11 +209,9 @@ def run_on_folder(src_dir, weights_path, names=None, load_vae=True):
         if vae is not None:
             vae_out = vae_roundtrip(orig, vae)
             v_vae = vessel_mask(vae_out)
-            ceiling_cldice, ceiling_prec, ceiling_sens = cl_dice(v_orig, v_vae)
-            row["clDice_ceiling"] = round(ceiling_cldice, 3)
-            row["clDice_ceiling_2px"] = round(cl_dice(
-                v_orig, cv2.dilate(v_vae.astype(np.uint8),
-                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0)[0], 3)
+            row["clDice_ceiling"] = round(cl_dice(v_orig, v_vae)[0], 3)
+            row["clDice_ceiling_2px"] = round(cl_dice_tol(v_orig, v_vae, 2)[0], 3)
+            row["clDice_ceiling_3px"] = round(cl_dice_tol(v_orig, v_vae, 3)[0], 3)
 
             perturbed = noise_floor_perturb(orig)
             v_perturbed = vessel_mask(perturbed)
