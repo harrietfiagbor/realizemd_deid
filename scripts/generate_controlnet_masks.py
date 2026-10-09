@@ -112,15 +112,34 @@ def idrid_gt_512(gt_root, stem, lesion):
     return None  # not all IDRiD images have both lesion types
 
 
+def gt_from_dir(gt_dir, stem):
+    """Load a GT mask for `stem` from a flat label dir (DDR lesion_segmentation
+    layout: label/EX/<stem>.tif|png). Returns 512 binary mask or None."""
+    if gt_dir is None:
+        return None
+    gt_dir = Path(gt_dir)
+    for ext in ["tif", "tiff", "png", "jpg"]:
+        p = gt_dir / f"{stem}.{ext}"
+        if p.exists():
+            m = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+            m = cv2.resize(m, (SIZE, SIZE), interpolation=cv2.INTER_NEAREST)
+            return (m > 0).astype(np.uint8) * 255
+    return None
+
+
 def main():
     import argparse, csv
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True, help="dir of source images (.jpg/.png/.jpeg)")
-    ap.add_argument("--mode", required=True, choices=["ddr", "idrid", "healthy"])
+    ap.add_argument("--mode", required=True, choices=["ddr", "idrid", "healthy", "gt"],
+                    help="ddr=detector masks; idrid=IDRiD GT tree; gt=GT from --ex-gt-dir/--he-gt-dir "
+                         "(DDR lesion_segmentation: label/EX, label/HE); healthy=empty lesion channels")
     ap.add_argument("--vessel-weights", required=True)
     ap.add_argument("--ex-ckpt", default=None, help="required for mode=ddr")
     ap.add_argument("--he-ckpt", default=None, help="required for mode=ddr")
     ap.add_argument("--idrid-gt-root", default=None, help="required for mode=idrid")
+    ap.add_argument("--ex-gt-dir", default=None, help="mode=gt: flat dir of EX GT masks named <stem>.tif/png")
+    ap.add_argument("--he-gt-dir", default=None, help="mode=gt: flat dir of HE GT masks named <stem>.tif/png")
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=None, help="process only first N (sample QC run)")
     args = ap.parse_args()
@@ -143,6 +162,10 @@ def main():
         print("Loading HE detector..."); he_model, he_thr = load_detector(args.he_ckpt, device, "he")
     if args.mode == "idrid":
         assert args.idrid_gt_root, "mode=idrid needs --idrid-gt-root"
+    if args.mode == "gt":
+        assert args.ex_gt_dir or args.he_gt_dir, (
+            "mode=gt needs at least one of --ex-gt-dir / --he-gt-dir -- "
+            "without them every lesion channel would be silently empty")
 
     exts = ("*.jpg", "*.jpeg", "*.png", "*.tif")
     files = sorted({p for e in exts for p in Path(args.src).glob(e)})
@@ -151,9 +174,13 @@ def main():
     print(f"\n{len(files)} images, mode={args.mode}\n")
 
     rows = []
-    n_load_fail = n_gt_missing = n_ex_empty = n_he_empty = 0
+    n_load_fail = n_gt_missing = n_ex_empty = n_he_empty = n_skip = 0
     for i, fp in enumerate(files):
         stem = fp.stem
+        if (out / "control" / f"{stem}_control.png").exists():   # resume: skip already-done
+            n_skip += 1
+            continue
+        print(f"[{i+1}/{len(files)}] {stem}", flush=True)
         img_bgr = cv2.imread(str(fp))
         if img_bgr is None:
             n_load_fail += 1
@@ -173,6 +200,13 @@ def main():
         elif args.mode == "idrid":
             ex = idrid_gt_512(args.idrid_gt_root, stem, "EX")
             he = idrid_gt_512(args.idrid_gt_root, stem, "HE")
+            if ex is None and he is None:
+                status = "gt_missing"; n_gt_missing += 1
+            ex = ex if ex is not None else np.zeros((SIZE, SIZE), np.uint8)
+            he = he if he is not None else np.zeros((SIZE, SIZE), np.uint8)
+        elif args.mode == "gt":   # real GT masks from flat label dirs (DDR lesion_segmentation)
+            ex = gt_from_dir(args.ex_gt_dir, stem)
+            he = gt_from_dir(args.he_gt_dir, stem)
             if ex is None and he is None:
                 status = "gt_missing"; n_gt_missing += 1
             ex = ex if ex is not None else np.zeros((SIZE, SIZE), np.uint8)
@@ -198,12 +232,26 @@ def main():
         w.writeheader(); w.writerows(rows)
 
     n = len(files)
+    n_done = len(list((out / "control").glob("*_control.png")))
     print("\n" + "=" * 60)
-    print(f"mode={args.mode}  processed={n}")
-    print(f"  load_fail={n_load_fail}  gt_missing={n_gt_missing}")
-    print(f"  EX-empty masks: {n_ex_empty}/{n}   HE-empty masks: {n_he_empty}/{n}")
-    print(f"  (empty is EXPECTED for healthy / low-grade; load_fail is a REAL problem)")
-    print(f"control images -> {out/'control'}/   summary -> {out/'mask_summary.csv'}")
+    print(f"mode={args.mode}  total={n}  skipped(already done)={n_skip}  newly processed={n - n_skip}")
+    print(f"  control masks on disk now: {n_done}/{n}")
+    print(f"  this run: load_fail={n_load_fail}  gt_missing={n_gt_missing}")
+    print(f"  this run empty masks: EX={n_ex_empty} HE={n_he_empty} (empty EXPECTED for low-grade; load_fail is REAL)")
+    print(f"control images -> {out/'control'}/   summary(this run) -> {out/'mask_summary.csv'}")
+
+    # loud guard: in GT modes, a high gt_missing fraction means the stem-matching/dir is WRONG,
+    # which would silently produce all-empty lesion channels. Fail loud, don't let it pass as "healthy".
+    processed = n - n_skip
+    if args.mode in ("gt", "idrid") and processed > 0 and n_gt_missing > 0.2 * processed:
+        print("\n" + "!" * 60)
+        print(f"WARNING: {n_gt_missing}/{processed} images had NO matching GT mask "
+              f"({100*n_gt_missing/processed:.0f}%).")
+        print("This almost certainly means the image stems don't match the GT filenames,")
+        print("or the --ex-gt-dir/--he-gt-dir/--idrid-gt-root path is wrong. The lesion")
+        print("channels for those images are EMPTY -- do NOT use these as training data")
+        print("until the structure is confirmed. Check a few stems vs the label dir contents.")
+        print("!" * 60)
 
 
 if __name__ == "__main__":
