@@ -99,9 +99,44 @@ def detect_512(model, img_bgr_512, device, threshold):
 DETECTOR_WINDOW = {"ex": (512, 384), "he": (768, 640)}
 
 
-def detect_fullres_512(model, img_bgr_full, device, threshold, which):
+def load_od_detector(ckpt_path, device):
+    """Learned optic-disc detector od_run1_b0 (decision.md L947-985). Identity asserted."""
+    import torch
+    import segmentation_models_pytorch as smp
+    c = torch.load(ckpt_path, map_location=device, weights_only=False)
+    if c.get("encoder") != "efficientnet-b0" or c.get("epoch") != 5 or round(c.get("dice", 0), 3) != 0.963:
+        raise SystemExit(f"[ABORT] OD checkpoint is not od_run1_b0: encoder={c.get('encoder')} "
+                         f"epoch={c.get('epoch')} dice={c.get('dice')}")
+    m = smp.Unet(encoder_name=c["encoder"], in_channels=3, classes=1)
+    m.load_state_dict(c["state_dict"]); m.to(device).eval()
+    print(f"  OD detector OK: {c['encoder']} epoch={c['epoch']} dice={c['dice']:.4f} img_size={c['img_size']}")
+    return m, c["img_size"]
+
+
+def od_mask_fullres(od_model, od_size, img_bgr_full, device):
+    """Exactly check_od_contamination_learned.get_od_mask (branch victoria-ex-od-exclusion-wiring):
+    CLAHE-preprocessed image resized whole to img_size, sigmoid>0.5, NEAREST back to full res."""
+    import torch
+    rgb = preprocess_for_detector(img_bgr_full)
+    H, W = rgb.shape[:2]
+    r = cv2.resize(rgb, (od_size, od_size))
+    with torch.no_grad():
+        t = torch.from_numpy(r.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
+        prob = torch.sigmoid(od_model(t.to(device)))[0, 0].cpu().numpy()
+    return cv2.resize((prob > 0.5).astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST) > 0
+
+
+def detect_fullres_512(model, img_bgr_full, device, threshold, which, exclude_full=None):
     """Full-res sliding window at the detector's own trained patch/stride, then an any-pixel
-    downsample of the binary mask to 512 so small lesions are not lost."""
+    downsample of the binary mask to 512 so small lesions are not lost. `exclude_full` (bool,
+    full-res) is removed BEFORE downsampling -- used for EX optic-disc exclusion (decision L1087)."""
+    pred = detect_fullres(model, img_bgr_full, device, threshold, which, exclude_full)
+    mask = pred.astype(np.uint8) * 255
+    return (cv2.resize(mask, (SIZE, SIZE), interpolation=cv2.INTER_AREA) > 0).astype(np.uint8) * 255
+
+
+def detect_fullres(model, img_bgr_full, device, threshold, which, exclude_full=None):
+    """Full-res boolean prediction (before any downsampling)."""
     import torch
     patch, stride = DETECTOR_WINDOW[which]
     rgb = preprocess_for_detector(img_bgr_full)
@@ -116,8 +151,10 @@ def detect_fullres_512(model, img_bgr_full, device, threshold, which):
                 t = torch.from_numpy(c.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
                 prob[y:y + patch, x:x + patch] += torch.sigmoid(model(t.to(device)))[0, 0].cpu().numpy()
                 cnt[y:y + patch, x:x + patch] += 1
-    mask = ((prob / np.maximum(cnt, 1)) > threshold).astype(np.uint8) * 255
-    return (cv2.resize(mask, (SIZE, SIZE), interpolation=cv2.INTER_AREA) > 0).astype(np.uint8) * 255
+    pred = (prob / np.maximum(cnt, 1)) > threshold
+    if exclude_full is not None:
+        pred &= ~exclude_full
+    return pred
 
 
 def vessel_512(img_rgb_512, threshold=0.5):
@@ -165,6 +202,8 @@ def main():
     ap.add_argument("--vessel-weights", required=True)
     ap.add_argument("--ex-ckpt", default=None, help="required for mode=ddr")
     ap.add_argument("--he-ckpt", default=None, help="required for mode=ddr")
+    ap.add_argument("--od-ckpt", default=None,
+                    help="mode=ddr: learned OD checkpoint (od_run1_b0) for EX disc exclusion (decision L1087)")
     ap.add_argument("--idrid-gt-root", default=None, help="required for mode=idrid")
     ap.add_argument("--ex-gt-dir", default=None, help="mode=gt: flat dir of EX GT masks named <stem>.tif/png")
     ap.add_argument("--he-gt-dir", default=None, help="mode=gt: flat dir of HE GT masks named <stem>.tif/png")
@@ -188,6 +227,8 @@ def main():
         assert args.ex_ckpt and args.he_ckpt, "mode=ddr needs --ex-ckpt and --he-ckpt"
         print("Loading EX detector..."); ex_model, ex_thr = load_detector(args.ex_ckpt, device, "ex")
         print("Loading HE detector..."); he_model, he_thr = load_detector(args.he_ckpt, device, "he")
+        assert args.od_ckpt, "mode=ddr needs --od-ckpt (EX disc exclusion is the decided production setting)"
+        print("Loading OD detector..."); od_model, od_size = load_od_detector(args.od_ckpt, device)
     if args.mode == "idrid":
         assert args.idrid_gt_root, "mode=idrid needs --idrid-gt-root"
     if args.mode == "gt":
@@ -223,7 +264,8 @@ def main():
 
         status = "ok"
         if args.mode == "ddr":
-            ex = detect_fullres_512(ex_model, img_bgr, device, ex_thr, "ex")
+            disc = od_mask_fullres(od_model, od_size, img_bgr, device)
+            ex = detect_fullres_512(ex_model, img_bgr, device, ex_thr, "ex", exclude_full=disc)
             he = detect_fullres_512(he_model, img_bgr, device, he_thr, "he")
         elif args.mode == "idrid":
             ex = idrid_gt_512(args.idrid_gt_root, stem, "EX")
