@@ -13,10 +13,10 @@ Per-source mask provenance (--mode):
              than detector, "where available" per Adam). Pass --idrid-gt-root.
   healthy  : vessel = Model A; EX/HE = EMPTY (all-zero) -- teaches "healthy = clean".
 
-Everything is done at 512px: images resized to 512 first, so each detector sees a
-single native 512 patch (patch_size the detectors were trained with) and the masks
-land at exactly the resolution the generator sees. (If sample QC shows EX/HE too
-sparse at 512, switch to full-res sliding-window detection -- flagged, not assumed.)
+Output control images are 512px. Vessels: Model A on the 512-resized image (its fixed
+input). EX/HE detectors: full-res sliding window at each detector's own trained window
+(EX 512/384, HE 768/640 -- decision.md L852), mask then downsampled to 512. Shrinking the
+whole image to 512 for the detectors (old detect_512 path) collapses recall -- do not.
 
 CROSS-VALIDATION built in (per the always-cross-validate rule):
   - Asserts the EX/HE checkpoint identity (epoch/recall metadata) matches the
@@ -90,6 +90,34 @@ def detect_512(model, img_bgr_512, device, threshold):
     with torch.no_grad():
         prob = torch.sigmoid(model(t.to(device)))[0, 0].cpu().numpy()
     return (prob > threshold).astype(np.uint8) * 255
+
+
+# Each detector's VALIDATED inference window (decision.md L852): EX was trained/evaluated on
+# 512px patches (stride 384), HE on 768px patches (stride 640). Running either on a whole image
+# shrunk to 512 (detect_512) puts lesions far below training scale and collapses recall --
+# that mistake produced the unusable grade3plus masks. Do not use detect_512 for real masks.
+DETECTOR_WINDOW = {"ex": (512, 384), "he": (768, 640)}
+
+
+def detect_fullres_512(model, img_bgr_full, device, threshold, which):
+    """Full-res sliding window at the detector's own trained patch/stride, then an any-pixel
+    downsample of the binary mask to 512 so small lesions are not lost."""
+    import torch
+    patch, stride = DETECTOR_WINDOW[which]
+    rgb = preprocess_for_detector(img_bgr_full)
+    H, W = rgb.shape[:2]
+    prob = np.zeros((H, W), np.float32); cnt = np.zeros((H, W), np.float32)
+    ys = sorted(set(list(range(0, max(H - patch, 1), stride)) + [max(H - patch, 0)]))
+    xs = sorted(set(list(range(0, max(W - patch, 1), stride)) + [max(W - patch, 0)]))
+    with torch.no_grad():
+        for y in ys:
+            for x in xs:
+                c = rgb[y:y + patch, x:x + patch]
+                t = torch.from_numpy(c.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
+                prob[y:y + patch, x:x + patch] += torch.sigmoid(model(t.to(device)))[0, 0].cpu().numpy()
+                cnt[y:y + patch, x:x + patch] += 1
+    mask = ((prob / np.maximum(cnt, 1)) > threshold).astype(np.uint8) * 255
+    return (cv2.resize(mask, (SIZE, SIZE), interpolation=cv2.INTER_AREA) > 0).astype(np.uint8) * 255
 
 
 def vessel_512(img_rgb_512, threshold=0.5):
@@ -195,8 +223,8 @@ def main():
 
         status = "ok"
         if args.mode == "ddr":
-            ex = detect_512(ex_model, img_bgr_512, device, ex_thr)
-            he = detect_512(he_model, img_bgr_512, device, he_thr)
+            ex = detect_fullres_512(ex_model, img_bgr, device, ex_thr, "ex")
+            he = detect_fullres_512(he_model, img_bgr, device, he_thr, "he")
         elif args.mode == "idrid":
             ex = idrid_gt_512(args.idrid_gt_root, stem, "EX")
             he = idrid_gt_512(args.idrid_gt_root, stem, "HE")
